@@ -19,7 +19,7 @@ library(ggplot2)
 The `read_lines()` function from the __readr__ package works in the same way as the `base::readLines()` function, returning a character vector with one element for each line read in from the source string or text file.  I use it here to import the `tournamentinfo.txt` file from my remote GitHub repository for this project.  Unlike the corresponding __base__ functions, __readr__ functions can connect to and read in from HTTPS URLs without additional workarounds or function calls.
 
 ```{r read-in-tournament-info}
-raw_data <- read_lines("https://github.com/juddanderman/Data_607_Project_1/raw/master/tournamentinfo.txt")
+raw_data <- read_lines("https://github.com/juddanderman/cuny-data-607/raw/master/Project1/tournamentinfo.txt")
 
 head(raw_data)
 ```

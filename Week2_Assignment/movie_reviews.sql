@@ -5,21 +5,21 @@ use movie_reviews;
 drop table if exists reviews, critics, films;
 
 create table films (
-	id smallint NOT NULL auto_increment,
+    id smallint NOT NULL auto_increment,
     title varchar(200),
-	release_year smallint,
-	imdb_rating	decimal(3, 1),
+    release_year smallint,
+    imdb_rating decimal(3, 1),
     genre varchar(100),
-	mpaa_rating	varchar(5),
+    mpaa_rating varchar(5),
     runtime smallint,
-	imdb_votes mediumint,
-	gross decimal(6, 2),
-	director varchar(100),
+    imdb_votes mediumint,
+    gross decimal(6, 2),
+    director varchar(100),
     PRIMARY KEY (id)
 );
 
 create table critics (
-	id smallint NOT NULL auto_increment PRIMARY KEY,
+    id smallint NOT NULL auto_increment PRIMARY KEY,
     initials varchar(2),
     gender varchar(1)
 );
@@ -30,33 +30,33 @@ create table if not exists reviews (
     critic_id smallint,
     score tinyint,
     foreign key (film_id) references films(id),
-	foreign key (critic_id) references critics(id)
+    foreign key (critic_id) references critics(id)
 );
 
 insert into films 
 (title, release_year, imdb_rating, genre, 
-	mpaa_rating, runtime, imdb_votes, gross, director)
+    mpaa_rating, runtime, imdb_votes, gross, director)
 values 
 ('The Shawshank Redemption', 1994, 9.3, 'Crime/Drama',
-	'R', 142, 1701593, 28.34, 'Darabont'),
+    'R', 142, 1701593, 28.34, 'Darabont'),
 ('The Dark Knight',	2008, 8.9, 'Action/Crime/Drama',	
     'PG-13', 152, 1688932, 533.32, 'Nolan'),
-('Pulp Fiction', 1994, 8.9,	'Crime/Drama',
-	'R', 154, 1333651, 107.93, 'Tarantino'),
-('Schindler''s List', 1993,	8.9, 'Biography/Drama/History',
-	'R', 195, 871296, 96.07, 'Spielberg'),
-('The Lord of the Rings: The Return of the King', 2003,	8.9, 'Action/Adventure/Drama',
-	'PG-13', 201, 1223750, 377.02, 'Jackson'),
+('Pulp Fiction', 1994, 8.9, 'Crime/Drama',
+    'R', 154, 1333651, 107.93, 'Tarantino'),
+('Schindler''s List', 1993, 8.9, 'Biography/Drama/History',
+    'R', 195, 871296, 96.07, 'Spielberg'),
+('The Lord of the Rings: The Return of the King', 2003, 8.9, 'Action/Adventure/Drama',
+    'PG-13', 201, 1223750, 377.02, 'Jackson'),
 ('Fight Club', 1999, 8.8, 'Drama', 
-	'R', 139, 1357516, 37.02, 'Fincher'),
+    'R', 139, 1357516, 37.02, 'Fincher'),
 ('Inception', 2010,	8.8, 'Action/Adventure/Sci-Fi',
-	'PG-13', 148, 1479613, 292.57, 'Nolan'),
+    'PG-13', 148, 1479613, 292.57, 'Nolan'),
 ('The Lord of the Rings: The Fellowship of the Ring', 2001, 8.8, 'Action/Adventure/Drama',
-	'PG-13', 178, 1246681, 313.84, 'Jackson'),
+    'PG-13', 178, 1246681, 313.84, 'Jackson'),
 ('Forest Gump', 1994, 8.8, 'Comedy/Drama',
-	'PG-13', 142, 1261695, 329.69, 'Zemeckis'),
+    'PG-13', 142, 1261695, 329.69, 'Zemeckis'),
 ('The Matrix', 1999, 8.7, 'Action/Sci-Fi',
-	'R', 136, 1226030, 171.38,	'Wachowskis');
+    'R', 136, 1226030, 171.38,	'Wachowskis');
 
 insert into critics (initials, gender)
 values 
@@ -91,17 +91,17 @@ fields terminated by ',' optionally enclosed by '"'
 escaped by '\\'
 lines terminated by '\n'
 from (select 'title', 'release_year', 'imdb_rating'
-	, 'genre', 'mpaa_rating', 'gross', 'director'
+    , 'genre', 'mpaa_rating', 'gross', 'director'
     , 'critic', 'critic_gender', 'critic_score'
-	union all
+    union all
     (select flm.title, flm.release_year, flm.imdb_rating 
-	, flm.genre, flm.mpaa_rating, flm.gross, flm.director
+    , flm.genre, flm.mpaa_rating, flm.gross, flm.director
     , concat(crit.initials, rev.critic_id) as 'critic'
     , crit.gender
     , rev.score
-	from films flm
-	join reviews rev on flm.id = rev.film_id
-	join critics crit on rev.critic_id = crit.id
-	order by flm.title, critic
+    from films flm
+    join reviews rev on flm.id = rev.film_id
+    join critics crit on rev.critic_id = crit.id
+    order by flm.title, critic
     )
 ) csvheaders;

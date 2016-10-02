@@ -1,0 +1,55 @@
+---
+title: "Data 607 Week 2 Assignment"
+author: "Judd Anderman"
+date: "September 11, 2016"
+output: html_document
+---
+
+#### Introduction
+This week's assignment called for students to choose six recent popular movies and to solicit scored reviews from 1 to 5 of those films from at least five people.  The results were to be stored in a SQL database and then migrated into a data frame in R.  I chose the top ten highest rated movies released since 1990 from IMDB's "Top 250" Titles list ([IMDB Top 250](http://www.imdb.com/search/title?groups=top_250&sort=user_rating)) for subsequent reviewing.  I collected ratings from 5 friends and family members by phone, then entered those scores as well as my own into a MySQL database along with data about each of the films that I sourced from IMDB, including year of release, genre(s), MPAA rating, runtime, and IMDB rating.
+
+The SQL script I wrote to create a movie reviews database and the relevant tables, insert the collected data into the tables, and output a result set as a .csv file with headers to a public folder on my machine can be found here: [SQL Script](https://github.com/juddanderman/Week2_Assignment/raw/master/movie_reviews.sql).  The .csv file was copied and pasted from the public folder into the working directory for my R project, which out of convenience also served as my GitHub repository for this assignment, and can be accessed here: [Week 2 Assignment Repository](https://github.com/juddanderman/Week2_Assignment).  With this approach, the .csv file could be easily read into R from the remote GitHub repository rather than from a local source.  
+
+```{r, echo = FALSE, warning = FALSE}
+library(knitr)
+opts_chunk$set(tidy.opts = list(width.cutoff= 60))
+```
+
+#### Load required libraries
+```{r load-libraries, warning = FALSE}
+library(readr)
+library(ggplot2)
+```
+
+#### Import CSV file from GitHub repository into R data frame
+```{r read-in-csv, tidy = TRUE, message = FALSE, warning = FALSE}
+reviews <- read_csv("https://github.com/juddanderman/cuny-data-607/raw/master/Week2_Assignment/movie_reviews.csv", col_names = TRUE, na = c("\\N"))
+reviews <- as.data.frame(reviews)
+```
+
+#### Check for successful data import
+```{r check-data-frame}
+reviews <- as.data.frame(reviews)
+is.data.frame(reviews)
+head(reviews)
+```
+
+#### Visualizing the `reviews` data frame
+Below are bar plots of my personal review scores, mean scores by reviewer gender, and mean scores across my small sample of amateur film critics.  Perhaps not surprisingly given my method of selecting films, the typical scores provided by my reviewers were quite high, with a median value of `r median(reviews$critic_score, na.rm = TRUE)` and a mean of `r signif(mean(reviews$critic_score, na.rm = TRUE), digits = 4)`.
+
+```{r quick-viz, tidy = TRUE}
+myscores <- subset(reviews, critic == 'JA3', select = c(title, critic_score))
+
+ggplot(myscores, aes(x = title, y = critic_score, fill = title)) + geom_bar(stat = "identity") + ggtitle("My Reviews") + xlab ("Film") + ylab("Score") + guides(fill = FALSE) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+gen_avg <- data.frame(c(mean(reviews$critic_score[reviews$critic_gender == 'f'], na.rm = TRUE), Male = mean(reviews$critic_score[reviews$critic_gender == 'm'], na.rm = TRUE)), c("Female", "Male"))
+colnames(gen_avg) <- c("mean_score", "gender")
+
+ggplot(gen_avg, aes(x = gender, y = mean_score, fill = gender)) + geom_bar(stat = "identity") + ggtitle ("Average Scores by Gender") + xlab ("Gender") + ylab("Mean Score") + guides(fill = FALSE)
+
+meanscores <- aggregate(reviews$critic_score ~ reviews$critic, reviews, mean)
+colnames(meanscores) <- c("critic", "mean_score")
+
+ggplot(meanscores, aes(x = critic, y = mean_score, fill = critic)) + geom_bar(stat = "identity") + ggtitle ("Average Scores by Critic") + xlab ("Reviewer") + ylab("Mean Score") + guides(fill = FALSE)
+```
+
