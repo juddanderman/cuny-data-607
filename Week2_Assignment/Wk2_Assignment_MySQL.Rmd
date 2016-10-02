@@ -1,0 +1,94 @@
+---
+title: "Data 607 Week 2 Assignment 2.0 - MySQL Connection"
+author: "Judd Anderman"
+date: "September 11, 2016"
+output: html_document
+---
+
+#### Introduction
+This week's assignment called for students to choose six recent popular movies and to solicit scored reviews from 1 to 5 of those films from at least five people.  The results were to be stored in a SQL database and then migrated into a data frame in R.  I chose the top ten highest rated movies released since 1990 from IMDB's "Top 250" Titles list ([IMDB Top 250](http://www.imdb.com/search/title?groups=top_250&sort=user_rating)) for subsequent reviewing.  I collected ratings from 5 friends and family members by phone, then entered those scores as well as my own into a MySQL database along with data about each of the films that I sourced from IMDB, including year of release, genre(s), MPAA rating, runtime, and IMDB rating.
+
+The SQL script I wrote to create a movie reviews database and the relevant tables, insert the collected data into the tables, and output a result set as a .csv file with headers to a public folder on my machine can be found here: [SQL Script](https://github.com/juddanderman/Week2_Assignment/raw/master/movie_reviews.sql).    
+
+```{r, echo = FALSE, warning = FALSE}
+library(knitr)
+opts_chunk$set(tidy.opts = list(width.cutoff= 60))
+```
+
+#### Load required libraries
+```{r load-libraries, warning = FALSE, message = FALSE}
+library(ggplot2)
+library(RMySQL)
+```
+
+```{r mysql-password, echo = FALSE}
+# Enter appropriate username and password below
+user <- "#####"
+pass <- "#####"
+```
+
+#### Connect to MySQL DB
+```{r connect-mysql, tidy = TRUE, message = FALSE, warning = FALSE}
+movie_db <- dbConnect(MySQL(), host = "localhost", dbname = "movie_reviews", port = 50044, username = user, password = pass)
+
+reviews <- dbGetQuery(movie_db, 
+"select flm.title, flm.release_year, flm.imdb_rating 
+, flm.genre, flm.mpaa_rating, flm.gross, flm.director
+, concat(crit.initials, rev.critic_id) as 'critic'
+, crit.gender
+, rev.score
+from films flm
+join reviews rev on flm.id = rev.film_id
+join critics crit on rev.critic_id = crit.id
+order by flm.title, critic"
+)
+```
+
+#### Disconnect from DB
+```{r disconnect}
+dbDisconnect(movie_db)
+```
+
+#### Check for successful data import
+```{r check-data-frame}
+reviews <- as.data.frame(reviews)
+is.data.frame(reviews)
+knitr::kable(head(reviews))
+```
+
+#### Visualizing the `reviews` data frame
+Below are bar plots of the counts of the scores in the data set, my personal review scores, mean scores by reviewer gender, mean scores across my small sample of amateur film critics, mean scores by film, and mean scores by MPAA rating.  Perhaps not surprisingly given my method of selecting films, the typical scores provided by my reviewers were quite high, with a median value of `r median(reviews$score, na.rm = TRUE)` and a mean of `r signif(mean(reviews$score, na.rm = TRUE), digits = 4)`.
+
+```{r quick-viz, tidy = TRUE}
+counts <- as.data.frame(table(reviews$score, useNA = "ifany"))
+colnames(counts) <- c("score", "freq")
+counts$score <- as.character(counts$score)
+counts[5, 1] <- "No Score"
+ggplot(counts, aes(x = score, y = freq, fill = score)) + geom_bar(stat = "identity") + ggtitle ("Counts of Scores") + xlab ("Score") + ylab("Count") + guides(fill = FALSE)
+
+myscores <- subset(reviews, critic == 'JA3', select = c(title, score))
+
+ggplot(myscores, aes(x = title, y = score, fill = title)) + geom_bar(stat = "identity") + ggtitle("My Reviews") + xlab ("Film") + ylab("Score") + guides(fill = FALSE) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+gen_avg <- data.frame(c(mean(reviews$score[reviews$gender == 'f'], na.rm = TRUE), Male = mean(reviews$score[reviews$gender == 'm'], na.rm = TRUE)), c("Female", "Male"))
+colnames(gen_avg) <- c("mean_score", "gender")
+
+ggplot(gen_avg, aes(x = gender, y = mean_score, fill = gender)) + geom_bar(stat = "identity") + ggtitle ("Average Scores by Gender") + xlab ("Gender") + ylab("Mean Score") + guides(fill = FALSE)
+
+meanscores <- aggregate(reviews$score ~ reviews$critic, reviews, mean)
+colnames(meanscores) <- c("critic", "mean_score")
+
+ggplot(meanscores, aes(x = critic, y = mean_score, fill = critic)) + geom_bar(stat = "identity") + ggtitle ("Average Scores by Critic") + xlab ("Reviewer") + ylab("Mean Score") + guides(fill = FALSE)
+
+meanscores2 <- aggregate(reviews$score ~ reviews$title, reviews, mean)
+colnames(meanscores2) <- c("title", "mean_score")
+
+ggplot(meanscores2, aes(x = title, y = mean_score, fill = title)) + geom_bar(stat = "identity") + ggtitle ("Average Scores by Film") + xlab ("Film") + ylab("Mean Score") + guides(fill = FALSE) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+meanscores3 <- aggregate(reviews$score ~ reviews$mpaa_rating, reviews, mean)
+colnames(meanscores3) <- c("rating", "mean_score")
+
+ggplot(meanscores3, aes(x = rating, y = mean_score, fill = rating)) + geom_bar(stat = "identity") + ggtitle ("Average Scores by MPAA Rating") + xlab ("MPAA Rating") + ylab("Mean Score") + guides(fill = FALSE)
+```
+
+

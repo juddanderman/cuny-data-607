@@ -1,0 +1,133 @@
+---
+title: "Data 607 Project 1"
+author: "Judd Anderman"
+date: "September 25, 2016"
+output: html_document
+---
+
+#### Project overview
+For this project students were provided a text file containing the results of a chess tournament structured as a cross-table.  Our task was to deliver an R Markdown file that generates a CSV file with the name of each player included in the given text file, their state or province, total number of points earned in terms of round outcomes (e.g. wins, losses, draws, byes, forfeitures, etc.), their Elo rating prior to tournament play, and the average pre-tournament rating of their opponents. I relied heavily on the text processing functions provided in the __stringr__ package to manipulate the given cross-table text into a form that could be more easily analyzed and accurately rendered as a CSV file with the desired variables.   
+
+#### Load required packages
+```{r load-packages, warning = FALSE}
+library(readr)
+library(stringr)
+library(ggplot2)
+```
+
+#### Import data from remote GitHub repository
+The `read_lines()` function from the __readr__ package works in the same way as the `base::readLines()` function, returning a character vector with one element for each line read in from the source string or text file.  I use it here to import the `tournamentinfo.txt` file from my remote GitHub repository for this project.  Unlike the corresponding __base__ functions, __readr__ functions can connect to and read in from HTTPS URLs without additional workarounds or function calls.
+
+```{r read-in-tournament-info}
+raw_data <- read_lines("https://github.com/juddanderman/Data_607_Project_1/raw/master/tournamentinfo.txt")
+
+head(raw_data)
+```
+
+#### Cleaning up the raw data
+In the first step of cleaning the vector of character strings assigned to `raw_data` above, I loop through each element of `raw_data` and use the `str_detect()` and `str_c()` functions to concatenate adjacent vector elements on the condition that both the indexed element and the next proceeding element contain meaningful content, i.e do not begin with "-" as the separator rows in the given cross-table do.  During each iteration, the concatenated strings, which correspond to the variable labels in the cross-table and the data for the players in the tournament, are incrementally assigned (using a separate index from the loop counter) to the elements of `cleaner`, which was initialized as a vector of empty strings with the appropriate length before the loop to avoid growing the vector during execution of the loop. 
+
+```{r clean-up-1}
+cleaner <- vector(mode = "character", length = length(raw_data[str_detect(raw_data, "^[^-]")]) / 2)
+j <- 1
+
+for (i in 1:length(raw_data)) {
+  if (str_detect(raw_data[i], "^[^-]") && str_detect(raw_data[i + 1], "^[^-]")) {
+    cleaner[j] <- str_c(raw_data[i], raw_data[i+1])
+    j <- j + 1
+  }
+}
+
+cleaner[1:3]
+```
+
+In the next data cleaning step, I use the `str_split()` function to split each element of the `cleaner` vector at every vertical bar, forward slash, and right arrow (i.e. a hypen followed by a greater than sign, "->"), which represent column boundaries, separators between USCF ID numbers and ratings, and separators between pre- and post-ratings respectively in the original cross-table.  Here, I use the argument `simplify = TRUE` in the function call so that `str_split()` returns a matrix of character vectors, and in this case, splitting leaves us with individual character strings for each variable label and data element.   
+
+```{r clean-up-2}
+cleaner <- str_split(cleaner, "[|]|/|(->)", simplify = TRUE)
+
+cleaner[1:3, -23]
+cleaner[, 23]
+```
+
+Noting that the elements in the 23^rd^ column of what is now a `cleaner` matrix are either exclusively space characters or empty strings, I remove that column from the matrix.  Then I replace a number of the elements of the first row of `cleaner` with new strings reflecting clearer names for the variables of interest.  I also duplicate the columns containing strings that refer to the outcomes and opponents played in each round and combine those columns to `cleaner` so that I can retain round outcome and opponent values as distinct columns and eventually process those variables independently.  Before moving on to cleaning the strings representing the player data, or values for each of the variables, I use `colnames()` to name the columns of the matrix with the character strings from the first row which represent the names of the variables, and then drop that row from the matrix.  
+
+```{r clean-up-3}
+cleaner <- cleaner[, -23]
+
+cleaner[1, c(1, 3, 4:10, 11, 13:15, 16:22)] <- c("Player_ID", "Total_Pts", str_c("Round", 1:7, "_Pair"), "State", "Rtg_Pre", "Rtg_Post", "Norm", str_c("Round", 1:7, "_Color"))
+cleaner[1, ] <- str_trim(cleaner[1, ])
+
+cleaner <- cbind(cleaner, cleaner[, 4:10])
+cleaner[1, 23:29] <- str_c("Round", 1:7, "_Outcome")
+
+cleaner[1, ]
+
+colnames(cleaner) <- cleaner[1, ]
+cleaner <- cleaner[-1, ]
+
+cleaner[1:3, ]
+```
+
+Below, I loop through the columns of `cleaner` and use regular expressions and the `str_extract()`, `str_replace()`, and `str_trim()` functions to replace the column elements with cleaned-up strings representing single values for each variable without leading or trailing spaces.  These string manipulation and matrix element replacement operations are conditioned on the column names of `cleaner` so that the element re-assignments occur as expected.  For example, the elements of the columns called `RoundX_Pair` and `RoundX_Outcome` which formerly contained identical character strings, are here assigned just the opponent pair ID numbers in the first case and just the match outcomes in the second. In addition, provisional ratings, e.g "P17", and extraneous characters, e.g. "R:\ ", are removed from the strings corresponding to players' pre- and post-tournament ratings.  Lastly, the matrix is coerced to a data frame so that the elements can eventually also be coerced to a mix of the appropriate data types. 
+
+```{r clean-up-4}
+for (i in 1:ncol(cleaner)) {
+  if (str_detect(colnames(cleaner)[i], "Pair")) {
+    cleaner[, i] <- str_extract(cleaner[, i], "(\\d+$)")
+  } else if (str_detect(colnames(cleaner)[i], "Outcome")) {
+    cleaner[, i] <- str_extract(cleaner[, i], "(^\\w+)")
+  } else if (colnames(cleaner)[i] == "Rtg_Pre") {
+    cleaner[, i] <- str_trim(str_replace(str_extract(cleaner[, i], "(\\w+)(( +)?$)"), "P\\d+", ""))
+  } else if (colnames(cleaner)[i] == "Rtg_Post") {
+    cleaner[, i] <- str_trim(str_replace(cleaner[, i], "P\\d+", ""))
+  } else {
+    cleaner[ , i] <- str_trim(cleaner[, i])
+  }
+}
+
+cleaner <- as.data.frame(cleaner, stringsAsFactors = FALSE)
+
+cleaner[1:3, ]
+```
+
+Below, I create a new vector `opp_mean` to store the average pre-tournament rating for each player's opponents, calculate those mean values (using the argument `na.rm = TRUE` to disregard unplayed rounds), round the means to integer values, and assign the resulting value to the element in `opp_mean` corresponding to the relevant player.  Then the desired columns from `cleaner` and the `opp_mean` vector are combined in a new data frame called `output` which will be used to write the CSV output.  The structure of `output` is quickly examined using the `str()` function and its contents are reproduced as a table in my R Markdown output using the `knitr::kable()` function.
+
+```{r prepare-output-df}
+opp_mean <- vector(mode = "integer", length = nrow(cleaner))
+
+for (i in 1:nrow(cleaner)) {
+  opp_mean[i] <- round(mean(as.numeric(cleaner$Rtg_Pre[as.numeric(unlist(cleaner[i, 4:10]))]), na.rm = TRUE), digits = 0)
+}
+
+output <- data.frame(Player_Name = cleaner$`Player Name`, State_Code = cleaner$State, Total_Pts = cleaner$Total_Pts, Pre_Rating = as.numeric(cleaner$Rtg_Pre), Opponents_Avg_Pre_Rtg = opp_mean, Post_Rating = as.numeric(cleaner$Rtg_Post), stringsAsFactors = FALSE)
+
+str(output)
+
+knitr::kable(output)
+```
+
+Here, the requested CSV file is written to the working directory, the file name and path can be changed as needed.  
+
+```{r write-csv}
+# Write CSV file to working directory
+write.csv(output, file = "chess_player_data.csv")
+```
+
+#### Visualizing the chess tournament data
+Finally, I visualize a few of the variables from the tournament data set using plotting functions from the __ggplot2__ package.  In particular, I graph the distribution of `Total_Pts` which represents point totals earned through match outcomes of win, draw, bye, and so on; the distribution of players' pre-tournament Elo ratings; the relationship between players' pre-ratings and their opponents' average pre-ratings; the relationship between `Total_Pts` and opponents' average pre-ratings; and the relationship between opponents' average pre-ratings and the difference between each player's pre- and post-tournament rating. 
+
+```{r output-plots}
+ggplot(output, aes(Total_Pts)) + geom_bar()
+
+ggplot(output, aes(Pre_Rating)) + geom_histogram(binwidth = 50)
+
+ggplot(output, aes(x = Pre_Rating, y = Opponents_Avg_Pre_Rtg)) + geom_point()
+
+ggplot(output, aes(x = Total_Pts, y = Opponents_Avg_Pre_Rtg)) + geom_boxplot() + coord_flip()
+
+ggplot(output, aes(x = Opponents_Avg_Pre_Rtg, y = Post_Rating - Pre_Rating)) + geom_point() + 
+  ylab("Delta_Rating") + 
+  geom_hline(yintercept = mean(output$Post_Rating - output$Pre_Rating)) +
+  geom_vline(xintercept = mean(output$Opponents_Avg_Pre_Rtg))
+```
