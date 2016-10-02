@@ -24,19 +24,19 @@ library(ggplot2)
 ```
 
 #### Import CSV data
-Read in the CSV and check its structure:
+Read in the CSV file, coerce to a data frame, and check the structure:
 
-```{r read-csv, warning = FALSE}
-delays <- read.csv("airline_delays.csv", stringsAsFactors = FALSE)
-delays
+```{r read-csv, message = FALSE}
+delays <- data.frame(read_csv("https://github.com/juddanderman/cuny-data-607/raw/master/Week5_Assignment/airline_delays.csv"))
+
 str(delays)
 ```
 
 #### Prepare `delays` data frame for tidying
-Replicate each airline name twice to fill in values in empty strings and rename the first two columns of `delays`:
+Replicate each airline name twice to fill in missing values in the first column and rename the first two columns of `delays`:
 
 ```{r prep-df}
-delays[1] <- rep(delays[which(delays[1] != ""), 1], each = 2)
+delays[1] <- rep(delays[which(!is.na(delays[1])), 1], each = 2)
 colnames(delays)[1:2] <- c("Airline", "Status")
 str(delays)
 ```

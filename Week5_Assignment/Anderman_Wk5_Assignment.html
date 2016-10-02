@@ -162,18 +162,13 @@ library(ggplot2)</code></pre>
 </div>
 <div id="import-csv-data" class="section level4">
 <h4>Import CSV data</h4>
-<p>Read in the CSV and check its structure:</p>
-<pre class="r"><code>delays &lt;- read.csv(&quot;airline_delays.csv&quot;, stringsAsFactors = FALSE)
-delays</code></pre>
-<pre><code>##         X     X.1 Los.Angeles Phoenix San.Diego San.Francisco Seattle
-## 1  ALASKA on time         497     221       212           503    1841
-## 2         delayed          62      12        20           102     305
-## 3 AM WEST on time         694    4840       383           320     201
-## 4         delayed         117     415        65           129      61</code></pre>
+<p>Read in the CSV file, coerce to a data frame, and check the structure:</p>
+<pre class="r"><code>delays &lt;- data.frame(read_csv(&quot;https://github.com/juddanderman/cuny-data-607/raw/master/Week5_Assignment/airline_delays.csv&quot;))</code></pre>
+<pre><code>## Warning: Missing column names filled in: 'X1' [1], 'X2' [2]</code></pre>
 <pre class="r"><code>str(delays)</code></pre>
 <pre><code>## 'data.frame':    4 obs. of  7 variables:
-##  $ X            : chr  &quot;ALASKA&quot; &quot;&quot; &quot;AM WEST&quot; &quot;&quot;
-##  $ X.1          : chr  &quot;on time&quot; &quot;delayed&quot; &quot;on time&quot; &quot;delayed&quot;
+##  $ X1           : chr  &quot;ALASKA&quot; NA &quot;AM WEST&quot; NA
+##  $ X2           : chr  &quot;on time&quot; &quot;delayed&quot; &quot;on time&quot; &quot;delayed&quot;
 ##  $ Los.Angeles  : int  497 62 694 117
 ##  $ Phoenix      : int  221 12 4840 415
 ##  $ San.Diego    : int  212 20 383 65
@@ -182,8 +177,8 @@ delays</code></pre>
 </div>
 <div id="prepare-delays-data-frame-for-tidying" class="section level4">
 <h4>Prepare <code>delays</code> data frame for tidying</h4>
-<p>Replicate each airline name twice to fill in values in empty strings and rename the first two columns of <code>delays</code>:</p>
-<pre class="r"><code>delays[1] &lt;- rep(delays[which(delays[1] != &quot;&quot;), 1], each = 2)
+<p>Replicate each airline name twice to fill in missing values in the first column and rename the first two columns of <code>delays</code>:</p>
+<pre class="r"><code>delays[1] &lt;- rep(delays[which(!is.na(delays[1])), 1], each = 2)
 colnames(delays)[1:2] &lt;- c(&quot;Airline&quot;, &quot;Status&quot;)
 str(delays)</code></pre>
 <pre><code>## 'data.frame':    4 obs. of  7 variables:
