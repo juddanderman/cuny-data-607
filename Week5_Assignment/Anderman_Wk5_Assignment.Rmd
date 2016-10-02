@@ -1,0 +1,112 @@
+---
+title: "Data 607 Week 5 Assignment"
+author: "Judd Anderman"
+date: "October 2, 2016"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    code_folding: show
+---
+
+### Tidying and Transforming Data
+
+This week's assignment required reproducing provided flight delay data for two airlines across five destinations in the form of a CSV file, reading the CSV data into R, tidying and transforming the data with __tidyr__ and __dplyr__, and performing a comparative analysis of arrival delays for the airlines.  
+
+#### Load required packages
+
+```{r load-packages, warning = FALSE, message = FALSE}
+library(readr)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+```
+
+#### Import CSV data
+Read in the CSV and check its structure:
+
+```{r read-csv, warning = FALSE}
+delays <- read.csv("airline_delays.csv", stringsAsFactors = FALSE)
+delays
+str(delays)
+```
+
+#### Prepare `delays` data frame for tidying
+Replicate each airline name twice to fill in values in empty strings and rename the first two columns of `delays`:
+
+```{r prep-df}
+delays[1] <- rep(delays[which(delays[1] != ""), 1], each = 2)
+colnames(delays)[1:2] <- c("Airline", "Status")
+str(delays)
+```
+
+#### Tidy the `delays` data frame
+Tidy `delays` using `gather()` to melt the dataset with the colvar `Destination` and `spread()` to rotate the elements of `Status` (i.e. `on time` and `delayed`) that represent the names of variables or types of observation into columns:
+
+```{r tidy}
+delays <- delays %>% gather(Destination, Count, Los.Angeles:Seattle)
+delays$Destination <- str_replace(delays$Destination, "[.]", " ")
+head(delays)
+
+delays <- delays %>% spread(Status, Count)
+colnames(delays) <- str_to_title(colnames(delays))
+colnames(delays) <- str_replace(colnames(delays), " ", "_")
+head(delays)
+```
+
+#### Analysis of delays for `ALASKA` and `AM WEST` airlines
+Below I calculate the proportion of delayed flights arriving at the five destination airports for both airlines, summary statistics of the airlines' delay rates across destinations, and the proportion of delayed flights for both airlines over their respective total flight counts.   
+
+```{r delay-analysis, message = FALSE}
+delays <- delays %>% mutate(Delay_Rate = Delayed / (Delayed + On_Time))
+knitr::kable(delays[c("Airline", "Destination", "Delay_Rate")] %>% 
+               arrange(Destination, Airline))
+
+summary_dly_rates <- summarize(group_by(delays, Airline), Min = min(Delay_Rate), 
+                               Median = median(Delay_Rate), Max = max(Delay_Rate), 
+                               SD = sd(Delay_Rate), Mean_Dly_Rate = mean(Delay_Rate))
+
+agg_dly_rate <- summarize(group_by(delays, Airline), Agg_Dly_Rate = sum(Delayed) / sum(Delayed + On_Time))
+
+summary_stats <- inner_join(summary_dly_rates, agg_dly_rate)
+knitr::kable(summary_stats)
+
+simpsons_paradox <- rbind(c("Mean Delay Rate Across Destinations", 
+                            summary_stats$Airline[which.min(summary_stats$Mean_Dly_Rate)]), 
+                          c("Aggregate Delay Rate Across All Flights", 
+                            summary_stats$Airline[which.min(summary_stats$Agg_Dly_Rate)]))
+colnames(simpsons_paradox) <- c("Timeliness Statistic", "Airline with Minimum or Most Favorable Value")
+knitr::kable(simpsons_paradox)
+```
+
+The delay rate calculations reveal that `r summary_stats$Airline[which.min(summary_stats$Mean_Dly_Rate)]` has a lower propoprtion of delayed flights at each of the five destinations and so a lower average delay rate across destinations, while `r summary_stats$Airline[which.min(summary_stats$Agg_Dly_Rate)]` has a lower proportion of delayed arrivals across all flights.   
+
+#### Plotting delays by destination and airline
+
+The seemingly counter-intuitive results of the flight delays comparison performed above are visualized below.  The final bar plot of counts of flights arriving at the five destination airports helps to illustrate how in this case the airline with the lowest proportion of delayed flights switches when one evaluates either the data partitioned by destination or the aggregate flight counts for the two airlines.  As Fung (2013) notes in the prologue to _Numbersense_, the given data set does not capture confounding variables or factors that might cause increased rates of delays like weather conditions, flight origin, pilot experience, and so on.  `AM WEST` has far more flights arriving in Phoenix compared to the other destinations, where the proportion of delayed flights is relatively low for both airlines, while `ALASKA` has a greater share of its flights arriving in Seattle, where the delay rates are greater for both airlines.  As a result, the aggregate delay rates across all flights are heavily weighted toward arrivals in Phoenix for `AM WEST`, where delays are relatively rare, and toward Seattle for `ALASKA`, where delays are relatively common, and so the trend found in the airport-by-airport comparison does not hold when one considers all flights in aggregate.  Following Fung, we might conclude that delay rates may be more influenced by a lurking variable like weather than by either airline or flight destination, and that our results reflect the correlation between weather and flight destination and the different distributions of routes among airlines.  
+
+```{r barplots}
+ggplot(delays, aes(Destination, Delay_Rate)) + 
+  geom_bar(aes(fill = Airline), position = "dodge", stat = "identity") + 
+  ylab("Delay Rate")
+
+ggplot(agg_dly_rate, aes(Airline, Agg_Dly_Rate)) + 
+  geom_bar(aes(fill = Airline), position = "dodge", stat = "identity") + 
+  ylab("Aggregate Delay Rate")
+
+delays_gathered <- delays %>% gather(Status, Flights, Delayed, On_Time)
+
+ggplot(delays_gathered, aes(x = Airline, y = Flights, fill = Status)) + 
+  geom_bar(position = "stack", stat = "identity") + facet_grid(~ Destination) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  scale_fill_discrete(labels = c("Delayed", "On Time"))
+```
+
+#### Sources 
+
+Fung, Kaiser (2013).  _Numbersense: How to Use Big Data to Your Advantage_.  McGraw-Hill: 1-15.
+
+  * Our data for this week's assignment come from Fung's _Numbersense_.  In the book's prologue, Fung shows how the flight delay data manifest Simpson's paradox, and reminds readers to pay close attention to the ways that different methods of aggregation and analysis can produce conflicting interpretations of the same data.  
+  
+Wickham, Hadley (2014).  Tidy Data.  _Journal of Statistical Software_, 59(10).
