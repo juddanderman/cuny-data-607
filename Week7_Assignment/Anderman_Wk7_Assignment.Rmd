@@ -12,7 +12,6 @@ This week's assignment required the creation of three files in HTML table, XML, 
 I used the __XML__ package to parse the XML and HTML files, and the __jsonlite__ package to parse the JSON file.
 
 ```{r setup, warning = FALSE, message = FALSE}
-setwd("~/DATA 607 Data Acquisition and Management/Week7_Assignment")
 library(RCurl)
 library(XML)
 library(jsonlite)
@@ -24,7 +23,9 @@ library(dplyr)
 
 #### Parse XML
 ```{r xml}
-books.xml <- xmlParse("books.xml")
+xml.URL <- 
+  getURL("https://raw.githubusercontent.com/juddanderman/cuny-data-607/master/Week7_Assignment/books.xml")
+books.xml <- xmlParse(xml.URL)
 root <- xmlRoot(books.xml)
 xmlName(root)
 xmlSize(root)
@@ -41,7 +42,9 @@ xml.df <- data.frame(t(xmlSApply(root, function(x) xmlSApply(x, xmlValue))), row
 
 #### Parse HTML Table
 ```{r html}
-books.html <- readHTMLTable("books.html", header = TRUE)
+html.URL <- 
+  getURL("https://raw.githubusercontent.com/juddanderman/cuny-data-607/master/Week7_Assignment/books.html")
+books.html <- readHTMLTable(html.URL, header = TRUE)
 books.html
 class(books.html)
 
@@ -50,7 +53,9 @@ html.df <- data.frame(books.html$`Sociology Books`)
 
 #### Parse JSON
 ```{r json}
-books.json <- fromJSON("books.json")
+json.URL <- 
+  getURL("https://raw.githubusercontent.com/juddanderman/cuny-data-607/master/Week7_Assignment/books.json")
+books.json <- fromJSON(json.URL)
 books.json
 class(books.json)
 
