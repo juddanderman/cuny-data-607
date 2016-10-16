@@ -1,0 +1,84 @@
+---
+title: "Data 607 Week 7 Assignment"
+author: "Judd Anderman"
+date: "October 16, 2016"
+output: html_document
+---
+
+#### Assignment Overview
+This week's assignment required the creation of three files in HTML table, XML, and JSON formats containing information about three of our favorite books in a particular subject area, with at least one book having multiple authors.  I chose three works of interactional sociology, two relatively well-known classics from the tradition and a more recent example, and included information about each book's title, authors, year of publication, publisher, number of pages of the first edition indicated by Google Books, and number of citations according to Google Scholar.    
+
+#### Load required packages
+I used the __XML__ package to parse the XML and HTML files, and the __jsonlite__ package to parse the JSON file.
+
+```{r setup, warning = FALSE, message = FALSE}
+setwd("~/DATA 607 Data Acquisition and Management/Week7_Assignment")
+library(RCurl)
+library(XML)
+library(jsonlite)
+library(DT)
+library(stringr)
+library(tidyr)
+library(dplyr)
+```
+
+#### Parse XML
+```{r xml}
+books.xml <- xmlParse("books.xml")
+root <- xmlRoot(books.xml)
+xmlName(root)
+xmlSize(root)
+```
+
+I used `xmlValue()` in nested calls to the function `xmlSApply()` to retrieve the values for the grandchildren of the root node, which contain the relevant data about each of the selected books.  The resulting matrix was then transposed and stored in a data frame.
+
+```{r xml-df}
+xmlSApply(root, function(x) xmlSApply(x, xmlValue))
+class(xmlSApply(root, function(x) xmlSApply(x, xmlValue)))
+
+xml.df <- data.frame(t(xmlSApply(root, function(x) xmlSApply(x, xmlValue))), row.names = NULL)
+```
+
+#### Parse HTML Table
+```{r html}
+books.html <- readHTMLTable("books.html", header = TRUE)
+books.html
+class(books.html)
+
+html.df <- data.frame(books.html$`Sociology Books`)
+```
+
+#### Parse JSON
+```{r json}
+books.json <- fromJSON("books.json")
+books.json
+class(books.json)
+
+json.df <- data.frame(books.json$`Sociology Books`)
+```
+
+#### Output Contents of R Data Frames 
+```{r output-1}
+options(DT.options = list(dom = 't', scrollX = TRUE))
+
+datatable(xml.df)
+datatable(html.df)
+datatable(json.df)
+```
+
+Without performing additional processing or manipulation, the data frames generated from each of the files are similar but not identical.  The data frames derived from the XML and HTML table files are identical aside from the difference in the column name for year of publication (`Year_Published` in `xml.df` versus `Year.Published` in `html.df`), but this difference could have been prevented by substituting the underscore with a period character in the relevant element names of the original XML file.  The `json.df` data frame has a slightly different structure than the other two owing to my use of an array to store the two author names for the third book.  As a result, the author values were parsed as a list rather than as an atomic vector. 
+
+```{r json-authors}
+is.atomic(books.json$`Sociology Books`$Author)
+is.atomic(books.json$`Sociology Books`$Title)
+```
+
+This data frame could be made to resemble the other two by separating its `Author` column into two columns as below.
+
+```{r output-2, warning = FALSE}
+json.df <- json.df %>% 
+  mutate(Author = sapply(json.df$Author, function(x) paste(x, collapse = ","))) %>%
+  separate(Author, c("Author", "Author.1"), sep = ",")
+
+datatable(json.df)
+```

@@ -1,0 +1,26 @@
+{"Sociology Books": [
+    {
+    "Title": "The Presentation of Self in Everyday Life",
+    "Author": "Erving Goffman",
+    "Year Published": 1959,
+    "Publisher": "Doubleday",
+    "Pages": 259,
+    "Citations": 43536
+    },
+    {
+    "Title": "Studies in Ethnomethodology",
+    "Author": "Harold Garfinkel",
+    "Year Published": 1967,
+    "Publisher": "Prentice-Hall",
+    "Pages": 288,
+    "Citations": 3508
+    },
+    {
+    "Title": "The Spectacle of History: Speech, Text, and Memory at the Iran-Contra Hearings",
+    "Author": ["Michael E. Lynch", "David Bogen"],
+    "Year Published": 1996,
+    "Publisher": "Duke University Press",
+    "Pages": 368,
+    "Citations": 378
+    }	
+]} 
