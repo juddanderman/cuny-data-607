@@ -1,0 +1,141 @@
+---
+title: "Data 607 Week 9 Assignment"
+author: "Judd Anderman"
+date: "October 30, 2016"
+output: 
+  html_document:
+    code_folding: show
+---
+
+### Web APIs
+
+This week's assignment required students to choose one of the [New York Times APIs](http://developer.nytimes.com), construct an interface in R to read in the JSON data, and transform and store the data in an R data frame.  I chose to use the [Article Search API](http://developer.nytimes.com/article_search_v2.json) which allows users to search articles from September 18, 1851 to today, and retrieve headlines, bylines, abstracts, lead paragraphs, links to multimedia, and additional data.  
+
+### Load Required Packages
+
+```{r setup, warning = FALSE, message = FALSE}
+library(RCurl)
+library(dplyr)
+library(stringr)
+library(httr)
+library(jsonlite)
+library(DT)
+library(rvest)
+```
+
+```{r api-key, echo = FALSE}
+# enter your API key below
+key <- "your-key-here"
+```
+
+I used a simple query - without filtering or faceting - for articles published between July 1, 2016 and today's date with the search term "rat" in their headlines, bylines, or bodies.  
+
+```{r api-query}
+# query string
+q <- "rat"  
+
+# beginning and end dates in "YYYYMMDD" format
+begin_date <- "20160701"
+end_date <- str_replace_all(Sys.Date(), "-", "")
+```
+
+### Check HTTP Response Header Fields
+
+```{r HTTP-response-header}
+base_url <- "https://api.nytimes.com/svc/search/v2/articlesearch.json?"
+
+resp <- GET(paste0(base_url, "api-key=", key))
+resp.df <- data.frame(names(headers(resp)), unlist(headers(resp)))
+colnames(resp.df) <- c("HTTP response header", "value")
+rownames(resp.df) <- NULL
+knitr::kable(resp.df, row.names = FALSE)
+```
+
+### Fetching JSON Data
+
+Querying certain pages for the chosen search term in iterated requests to the Article Search API produced HTTP 403 Forbidden errors.  These errors were reproduced by copying and pasting the relevant URL(s) into my web browser.  My code prints an error message to flag these instances, and because no records were retrieved in these requests, the corresponding data are absent from the R data frame and its somewhat simplified displayed output.  I also found that using `Sys.sleep()` between requests to the API prevented HTTP 429 errors.  
+
+```{r search-API, message = FALSE}
+Sys.sleep(2)
+init_data <- fromJSON(paste0(base_url, "q=", URLencode(q, reserved = TRUE), 
+                        "&begin_date=", begin_date, "&end_date=", end_date, 
+                        "&sort=oldest", "&api-key=", key))
+
+num_hits <- init_data$response$meta$hits
+num_pages <- ceiling(num_hits / 10) - 1
+
+search_data <- vector(mode = "list", length = (num_pages + 1))  
+response_time <- 0
+
+for (i in 0:num_pages) {
+  Sys.sleep(2)
+  message(paste0("page: ", i))
+  
+  from_api <- getURL(paste0(base_url, "q=", URLencode(q, reserved = TRUE), "&begin_date=",
+                          begin_date, "&end_date=", end_date, "&sort=oldest", "&page=", i,
+                          "&api-key=", key))
+  
+  if(validate(from_api)[1]) {
+    data <- fromJSON(from_api, flatten = TRUE)
+    response_time <- response_time + data$response$meta$time
+    cat("page: ", format(i, width = 6),
+        "    response time: ", format(response_time, width = 15), "\n")
+    search_data[[i + 1]] <- data$response$docs
+  } else {
+    err_msg <- read_html(from_api) %>% html_node("head > title") %>% html_text()
+    cat("page: ", format(i, width = 6), 
+        "    HTTP error: ", format(err_msg, width = 18, justify = "right"), "\n")
+    search_data[i + 1] <- NULL
+  }  
+}
+
+json_data <- search_data[sapply(search_data, length) > 0]
+
+search_data.df <- rbind.pages(json_data)
+```
+
+Two functions from the __jsonlite__ package - `rbind.pages()` and `flatten()` - were very helpful for quickly combining and flattening the nested data frames retreived through the API into a single 2 dimensional table.  I also examined the data frame after combining and flattening to find columns containing lists, which were often empty, so that unwanted columns could be omitted from my output, and then extracted keyword values so that they could be displayed without the other elements in the `keywords` lists produced from the parsed JSON data. 
+
+### Additional Data Cleaning
+
+```{r clean-data}
+# check data types of column vectors
+#str(search_data.df)
+#lapply(search_data.df, typeof)
+
+output.df <- search_data.df
+
+output.df$keywords <- lapply(search_data.df$keywords, 
+                                  function(x) str_c(x$value, collapse = ", "))
+
+output.df <- output.df %>% select(headline.main, byline.original, pub_date, 
+                          web_url:print_page, source, keywords, 
+                          document_type:subsection_name, type_of_material, 
+                          word_count) %>% 
+  mutate(web_url = str_c("<a href='", web_url, "' target='_blank'> ", web_url, " </a>")) %>%
+  rename(headline_main = headline.main, byline = byline.original) %>%
+  mutate(byline = str_replace_all(byline, "By ", "")) %>%
+  mutate(pub_date = str_trim(str_replace_all(pub_date, "T|Z", " ")), side = "both")
+``` 
+
+### Article Search API Query Results
+
+API query string: `r URLencode(q, reserved = TRUE)`
+
+Publication start and end date bounds (YYYYMMDD): `r str_c(begin_date, end_date, sep = " - ")`
+
+Number of hits: `r num_hits`
+
+API response time: `r response_time`
+
+`r data$copyright`
+
+```{r dataframe-output}
+datatable(output.df, options = list(scrollX = TRUE), escape = FALSE)
+```
+
+[![](http://static01.nytimes.com/packages/images/developer/logos/poweredby_nytimes_200c.png)](http://developer.nytimes.com)
+
+### R Sources
+
+[Stack Overflow 6/17/15: Converting URL character strings to active hyperlinks in `datatable()` output](http://stackoverflow.com/questions/30901027/convert-a-column-of-text-urls-into-active-hyperlinks-in-shiny)
