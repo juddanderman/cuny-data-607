@@ -115,7 +115,7 @@ output.df <- output.df %>% select(headline.main, byline.original, pub_date,
   mutate(web_url = str_c("<a href='", web_url, "' target='_blank'> ", web_url, " </a>")) %>%
   rename(headline_main = headline.main, byline = byline.original) %>%
   mutate(byline = str_replace_all(byline, "By ", "")) %>%
-  mutate(pub_date = str_trim(str_replace_all(pub_date, "T|Z", " ")), side = "both")
+  mutate(pub_date = str_trim(str_replace_all(pub_date, "T|Z", " "), side = "both"))
 ``` 
 
 ### Article Search API Query Results
