@@ -128,7 +128,7 @@ Number of hits: `r num_hits`
 
 API response time: `r response_time`
 
-`r data$copyright`
+`r init_data$copyright`
 
 ```{r dataframe-output}
 datatable(output.df, options = list(scrollX = TRUE), escape = FALSE)
