@@ -1,0 +1,181 @@
+---
+title: "Data 607 Week 10 Assignment"
+author: "Judd Anderman"
+date: "November 6, 2016"
+output: 
+  html_document:
+    code_folding: show
+---
+
+## Document Classification
+
+This week's assignment tasked students with predicting the classes of documents on the basis of an already classified training dataset.  I used the [public corpus](https://spamassassin.apache.org/publiccorpus/) of spam and ham emails from the Apache SpamAssassin Project for my training and test data.  I downloaded and unzipped the corpora linked below into my working directory for the assignment.  
+
+  * [https://spamassassin.apache.org/publiccorpus/20030228_easy_ham_2.tar.bz2](https://spamassassin.apache.org/publiccorpus/20030228_easy_ham_2.tar.bz2)
+  * [https://spamassassin.apache.org/publiccorpus/20030228_hard_ham.tar.bz2](https://spamassassin.apache.org/publiccorpus/20030228_hard_ham.tar.bz2)
+  * [https://spamassassin.apache.org/publiccorpus/20030228_spam.tar.bz2](https://spamassassin.apache.org/publiccorpus/20030228_spam.tar.bz2)
+
+### Load required packages
+
+```{r setup, warning = FALSE, message = FALSE}
+library(stringr)
+library(dplyr)
+library(tm)
+library(RTextTools)
+library(wordcloud)
+library(ROCR)
+library(ggplot2)
+```
+
+### Import spam and ham datasets, assign classifications, and combine corpora
+
+The individual spam and ham corpora were read-in by calling `DirSource()` within `VCorpus()` and pointing to the relevant subdirectories of my working directory for the assignment.  These were combined into a single corpus of `emails` after assigning their pre-existing classifications as spam or ham as metadata values with the `meta()` function.  
+
+```{r read-in}
+spam <- VCorpus(DirSource("spam", encoding = "UTF-8"))
+easy_ham <- VCorpus(DirSource("easy_ham_2", encoding = "UTF-8"))
+hard_ham <- VCorpus(DirSource("hard_ham", encoding = "UTF-8"))
+
+meta(spam, "spam") <- 1
+meta(easy_ham, "spam") <- 0
+meta(hard_ham, "spam") <- 0
+
+emails <- c(spam, easy_ham, hard_ham)
+```
+
+### Clean combined `emails` corpus
+
+Converting the character encoding of the contents of `emails` to "UTF-8-MAC" prevented errors in the execution of functions on the corpus in the remainder of the assignment.
+
+```{r clean}
+emails <- tm_map(emails, content_transformer(function(x) iconv(x, to = 'UTF-8-MAC', sub = 'byte')))
+emails <- tm_map(emails, content_transformer(tolower))
+emails <- tm_map(emails, removeNumbers)
+emails <- tm_map(emails, stripWhitespace)
+emails <- tm_map(emails, removeWords, words = stopwords("en"))
+emails <- tm_map(emails, content_transformer(function(x) str_replace_all(x, "[[:punct:]]", " ")))
+```
+
+### Word cloud of contents of `emails` after cleaning
+
+The top 500 words from the combined `emails` corpus were visualized in a word cloud.
+
+```{r viz, warning = FALSE}
+wordcloud(emails, min.freq = 3, max.words = 500)
+```
+
+### Randomize order of spam and ham in `emails` corpus
+
+The order of the emails in the combined corpus was randomized using the function `sample()` in order to ensure balanced proportions of spam and ham between the model training and testing subsets.   
+
+```{r randomize}
+set.seed(2016)
+emails <- sample(emails)
+
+props_classes <- bind_rows(data.frame(dataset = "training", prop.table(table(spam = meta(emails[1:1500]))), 
+                                      stringsAsFactors = FALSE),
+          data.frame(dataset = "test", prop.table(table(spam = meta(emails[1501:length(emails)]))), 
+                     stringsAsFactors = FALSE))
+colnames(props_classes)[3] <- "prop"
+
+knitr::kable(props_classes)
+```
+
+### Predict classes of test `emails`
+
+```{r predict}
+dtm <- DocumentTermMatrix(emails, control = list(minWordLength = 2, minDocFreq = 5)) 
+dtm
+
+dtm <- removeSparseTerms(dtm, 0.995)
+dtm
+
+# First 10 rows and 5 columns of document-term matrix
+inspect(dtm[1:10,1:5])
+
+# Most frequent terms in document-term matrix
+findFreqTerms(dtm, 1000)
+
+container <- create_container(dtm,
+                              labels = unlist(meta(emails)),
+                              trainSize = 1:1500,
+                              testSize = 1501:length(emails),
+                              virgin = FALSE)
+
+svm_model <- train_model(container, "SVM")
+tree_model <- train_model(container, "TREE")
+maxent_model <- train_model(container, "MAXENT")
+
+svm_out <- classify_model(container, svm_model)
+tree_out <- classify_model(container, tree_model)
+maxent_out <- classify_model(container, maxent_model)
+```
+
+### Incorrect classifications
+
+```{r wrong-class}
+results.df <- cbind(meta(emails[1501:length(emails)]), svm_out, tree_out, maxent_out)
+knitr::kable(results.df %>% filter(spam != SVM_LABEL | spam != TREE_LABEL | spam != MAXENTROPY_LABEL),
+             align = "r", row.names = TRUE)
+```
+
+### Summary statistics of classifiers' performance
+
+Summary statistics for the performance of the classifiers were obtained using the `create_analytics()` function from __RTextTools__.
+
+```{r analytics-summary}
+analytics <- create_analytics(container, cbind(svm_out, tree_out, maxent_out))
+
+knitr::kable(select(analytics@algorithm_summary, SVM_PRECISION:SVM_FSCORE))
+knitr::kable(select(analytics@algorithm_summary, TREE_PRECISION:TREE_FSCORE))
+knitr::kable(select(analytics@algorithm_summary, MAXENTROPY_PRECISION:MAXENTROPY_FSCORE))
+
+knitr::kable(analytics@ensemble_summary)
+```
+
+### ROC curves and AUC values for classifiers
+
+The classifiers' performance was also evaluated by plotting their ROC curves and calculating AUC values.  The three chosen classifier algorithms performed very well and very similarly in predicting the spam or ham class memberships of the test emails.  
+
+```{r roc-auc}
+results.df$SVM_PROB[results.df$SVM_LABEL == 0] <- 1 - results.df$SVM_PROB[results.df$SVM_LABEL == 0] 
+results.df$TREE_PROB[results.df$TREE_LABEL == 0] <- 1 - results.df$TREE_PROB[results.df$TREE_LABEL == 0] 
+results.df$MAXENTROPY_PROB[results.df$MAXENTROPY_LABEL == 0] <- 
+  (1 - results.df$MAXENTROPY_PROB[results.df$MAXENTROPY_LABEL == 0])
+
+pred_svm <- prediction(results.df$SVM_PROB, results.df$spam)
+pred_tree <- prediction(results.df$TREE_PROB, results.df$spam)
+pred_maxent <- prediction(results.df$MAXENTROPY_PROB, results.df$spam)
+
+prf_svm <- performance(pred_svm, measure = "tpr", x.measure = "fpr")
+prf_tree <- performance(pred_tree, measure = "tpr", x.measure = "fpr")
+prf_maxent <- performance(pred_maxent, measure = "tpr", x.measure = "fpr")
+
+auc_svm <- performance(pred_svm, measure = "auc")@y.values[[1]]
+auc_tree <- performance(pred_tree, measure = "auc")@y.values[[1]]
+auc_maxent <- performance(pred_maxent, measure = "auc")@y.values[[1]]
+
+legend.labels <- c(str_c("SVM AUC = ", round(auc_svm, digits = 4)),
+                   str_c("Tree AUC = ", round(auc_tree, digits = 4)),
+                   str_c("Max Entropy AUC = ", round(auc_maxent, digits = 4)))
+
+model_perf <- bind_rows(data.frame(model = "SVM", 
+                                  FPR = unlist(prf_svm@x.values), 
+                                  TPR = unlist(prf_svm@y.values),
+                                  stringsAsFactors = FALSE),
+                       data.frame(model = "Tree", 
+                                  FPR = unlist(prf_tree@x.values), 
+                                  TPR = unlist(prf_tree@y.values),
+                                  stringsAsFactors = FALSE),
+                       data.frame(model = "Max Entropy", 
+                                  FPR = unlist(prf_maxent@x.values), 
+                                  TPR = unlist(prf_maxent@y.values),
+                                  stringsAsFactors = FALSE))
+
+ggplot(model_perf, aes(FPR, TPR, color = model)) + 
+  geom_line() +
+  geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  ggtitle("Performance of Spam/Ham Classifiers") +
+  scale_color_discrete(name = "Classifier Model", labels = legend.labels) +
+  theme(legend.position = c(0.7, 0.2))
+```
