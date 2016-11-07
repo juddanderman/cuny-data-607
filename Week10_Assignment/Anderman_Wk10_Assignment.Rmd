@@ -23,6 +23,7 @@ library(dplyr)
 library(tm)
 library(RTextTools)
 library(wordcloud)
+library(DT)
 library(ROCR)
 library(ggplot2)
 ```
@@ -51,9 +52,9 @@ Converting the character encoding of the contents of `emails` to "UTF-8-MAC" pre
 emails <- tm_map(emails, content_transformer(function(x) iconv(x, to = 'UTF-8-MAC', sub = 'byte')))
 emails <- tm_map(emails, content_transformer(tolower))
 emails <- tm_map(emails, removeNumbers)
-emails <- tm_map(emails, stripWhitespace)
 emails <- tm_map(emails, removeWords, words = stopwords("en"))
-emails <- tm_map(emails, content_transformer(function(x) str_replace_all(x, "[[:punct:]]", " ")))
+emails <- tm_map(emails, content_transformer(function(x) str_replace_all(x, "[[:punct:]]|<|>", " ")))
+emails <- tm_map(emails, stripWhitespace)
 ```
 
 ### Word cloud of contents of `emails` after cleaning
@@ -87,11 +88,11 @@ knitr::kable(props_classes)
 dtm <- DocumentTermMatrix(emails, control = list(minWordLength = 2, minDocFreq = 5)) 
 dtm
 
-dtm <- removeSparseTerms(dtm, 0.995)
+dtm <- removeSparseTerms(dtm, 0.95)
 dtm
 
 # First 10 rows and 5 columns of document-term matrix
-inspect(dtm[1:10,1:5])
+inspect(dtm[1:10, 1:5])
 
 # Most frequent terms in document-term matrix
 findFreqTerms(dtm, 1000)
@@ -114,9 +115,9 @@ maxent_out <- classify_model(container, maxent_model)
 ### Incorrect classifications
 
 ```{r wrong-class}
-results.df <- cbind(meta(emails[1501:length(emails)]), svm_out, tree_out, maxent_out)
-knitr::kable(results.df %>% filter(spam != SVM_LABEL | spam != TREE_LABEL | spam != MAXENTROPY_LABEL),
-             align = "r", row.names = TRUE)
+results <- cbind(meta(emails[1501:length(emails)]), svm_out, tree_out, maxent_out)
+datatable(results %>% filter(spam != SVM_LABEL | spam != TREE_LABEL | spam != MAXENTROPY_LABEL),
+             rownames = TRUE, options = list(dom = 'tp', scrollX = TRUE))
 ```
 
 ### Summary statistics of classifiers' performance
@@ -135,17 +136,17 @@ knitr::kable(analytics@ensemble_summary)
 
 ### ROC curves and AUC values for classifiers
 
-The classifiers' performance was also evaluated by plotting their ROC curves and calculating AUC values.  The three chosen classifier algorithms performed very well and very similarly in predicting the spam or ham class memberships of the test emails.  
+The classifiers' performance was also evaluated by plotting their ROC curves and calculating AUC values.  
 
 ```{r roc-auc}
-results.df$SVM_PROB[results.df$SVM_LABEL == 0] <- 1 - results.df$SVM_PROB[results.df$SVM_LABEL == 0] 
-results.df$TREE_PROB[results.df$TREE_LABEL == 0] <- 1 - results.df$TREE_PROB[results.df$TREE_LABEL == 0] 
-results.df$MAXENTROPY_PROB[results.df$MAXENTROPY_LABEL == 0] <- 
-  (1 - results.df$MAXENTROPY_PROB[results.df$MAXENTROPY_LABEL == 0])
+results$SVM_PROB[results$SVM_LABEL == 0] <- 1 - results$SVM_PROB[results$SVM_LABEL == 0] 
+results$TREE_PROB[results$TREE_LABEL == 0] <- 1 - results$TREE_PROB[results$TREE_LABEL == 0] 
+results$MAXENTROPY_PROB[results$MAXENTROPY_LABEL == 0] <- 
+  (1 - results$MAXENTROPY_PROB[results$MAXENTROPY_LABEL == 0])
 
-pred_svm <- prediction(results.df$SVM_PROB, results.df$spam)
-pred_tree <- prediction(results.df$TREE_PROB, results.df$spam)
-pred_maxent <- prediction(results.df$MAXENTROPY_PROB, results.df$spam)
+pred_svm <- prediction(results$SVM_PROB, results$spam)
+pred_tree <- prediction(results$TREE_PROB, results$spam)
+pred_maxent <- prediction(results$MAXENTROPY_PROB, results$spam)
 
 prf_svm <- performance(pred_svm, measure = "tpr", x.measure = "fpr")
 prf_tree <- performance(pred_tree, measure = "tpr", x.measure = "fpr")
@@ -172,10 +173,176 @@ model_perf <- bind_rows(data.frame(model = "SVM",
                                   TPR = unlist(prf_maxent@y.values),
                                   stringsAsFactors = FALSE))
 
-ggplot(model_perf, aes(FPR, TPR, color = model)) + 
+model_perf$model <- factor(model_perf$model, levels = c("SVM", "Tree", "Max Entropy")) 
+
+ggplot(model_perf, aes(FPR, TPR, color = model, group = model)) + 
   geom_line() +
   geom_abline(slope = 1, intercept = 0, linetype = 2) +
   ggtitle("Performance of Spam/Ham Classifiers") +
   scale_color_discrete(name = "Classifier Model", labels = legend.labels) +
   theme(legend.position = c(0.7, 0.2))
 ```
+
+### Additional testing of models
+
+I also downloaded the following linked corpora of ham and spam and unzipped them in my current working directory for further model testing.
+
+  * [https://spamassassin.apache.org/publiccorpus/20021010_easy_ham.tar.bz2](https://spamassassin.apache.org/publiccorpus/20021010_easy_ham.tar.bz2)
+  * [https://spamassassin.apache.org/publiccorpus/20021010_hard_ham.tar.bz2](https://spamassassin.apache.org/publiccorpus/20021010_hard_ham.tar.bz2)
+  * [https://spamassassin.apache.org/publiccorpus/20021010_spam.tar.bz2](https://spamassassin.apache.org/publiccorpus/20021010_spam.tar.bz2)
+  
+The unzipped directories for these three sets of emails were renamed "test_easy_ham", "test_hard_ham", and "test_spam" respectively.
+
+```{r test-emails-2}
+spam2 <- VCorpus(DirSource("test_spam", encoding = "UTF-8"))
+easy_ham2 <- VCorpus(DirSource("test_easy_ham", encoding = "UTF-8"))
+hard_ham2 <- VCorpus(DirSource("test_hard_ham", encoding = "UTF-8"))
+
+meta(spam2, "spam") <- 1
+meta(easy_ham2, "spam") <- 0
+meta(hard_ham2, "spam") <- 0
+
+emails2 <- c(spam2, easy_ham2, hard_ham2)
+
+emails2 <- tm_map(emails2, content_transformer(function(x) iconv(x, to = 'UTF-8-MAC', sub = 'byte')))
+emails2 <- tm_map(emails2, content_transformer(tolower))
+emails2 <- tm_map(emails2, removeNumbers)
+emails2 <- tm_map(emails2, removeWords, words = stopwords("en"))
+emails2 <- tm_map(emails2, content_transformer(function(x) str_replace_all(x, "[[:punct:]]|<|>", " ")))
+emails2 <- tm_map(emails2, stripWhitespace)
+
+set.seed(1)
+emails2 <- sample(emails2)
+```
+
+### Edit `create_matrix()` function for compatibility between installed versions of __tm__ and __RTextTools__
+
+```{r create-matrix-edit}
+create_matrix_edit <- function (textColumns, language = "english", minDocFreq = 1, 
+    maxDocFreq = Inf, minWordLength = 3, maxWordLength = Inf, 
+    ngramLength = 1, originalMatrix = NULL, removeNumbers = FALSE, 
+    removePunctuation = TRUE, removeSparseTerms = 0, removeStopwords = TRUE, 
+    stemWords = FALSE, stripWhitespace = TRUE, toLower = TRUE, 
+    weighting = weightTf) 
+{
+    stem_words <- function(x) {
+        split <- strsplit(x, " ")
+        return(wordStem(unlist(split), language = language))
+    }
+    tokenize_ngrams <- function(x, n = ngramLength) return(rownames(as.data.frame(unclass(textcnt(x, 
+        method = "string", n = n)))))
+    control <- list(bounds = list(local = c(minDocFreq, maxDocFreq)), 
+        language = language, tolower = toLower, removeNumbers = removeNumbers, 
+        removePunctuation = removePunctuation, stopwords = removeStopwords, 
+        stripWhitespace = stripWhitespace, wordLengths = c(minWordLength, 
+            maxWordLength), weighting = weighting)
+    if (ngramLength > 1) {
+        control <- append(control, list(tokenize = tokenize_ngrams), 
+            after = 7)
+    }
+    else {
+        control <- append(control, list(tokenize = scan_tokenizer), 
+            after = 4)
+    }
+    if (stemWords == TRUE && ngramLength == 1) 
+        control <- append(control, list(stemming = stem_words), 
+            after = 7)
+    trainingColumn <- apply(as.matrix(textColumns), 1, paste, 
+        collapse = " ")
+    trainingColumn <- sapply(as.vector(trainingColumn, mode = "character"), 
+        iconv, to = "UTF8", sub = "byte")
+    corpus <- Corpus(VectorSource(trainingColumn), readerControl = list(language = language))
+    matrix <- DocumentTermMatrix(corpus, control = control)
+    if (removeSparseTerms > 0) 
+        matrix <- removeSparseTerms(matrix, removeSparseTerms)
+    if (!is.null(originalMatrix)) {
+        terms <- colnames(originalMatrix[, which(!colnames(originalMatrix) %in% 
+            colnames(matrix))])
+        weight <- 0
+        if (attr(weighting, "acronym") == "tf-idf") 
+            weight <- 1e-09
+        amat <- matrix(weight, nrow = nrow(matrix), ncol = length(terms))
+        colnames(amat) <- terms
+        rownames(amat) <- rownames(matrix)
+        fixed <- as.DocumentTermMatrix(cbind(matrix[, which(colnames(matrix) %in% 
+            colnames(originalMatrix))], amat), weighting = weighting)
+        matrix <- fixed
+    }
+    matrix <- matrix[, sort(colnames(matrix))]
+    gc()
+    return(matrix)
+}
+```
+
+```{r classify-new-emails}
+dtm2 <- create_matrix_edit(cbind(content(emails2)), minWordLength = 2, minDocFreq = 5, 
+                      weighting = weightTf, originalMatrix = dtm) 
+
+container2 <- create_container(dtm2,
+                              labels = unlist(meta(emails2)),
+                              testSize = 1:length(emails2),
+                              virgin = FALSE)
+
+svm_out2 <- classify_model(container2, svm_model)
+tree_out2 <- classify_model(container2, tree_model)
+maxent_out2 <- classify_model(container2, maxent_model)
+
+analytics2 <- create_analytics(container2, cbind(svm_out2, tree_out2, maxent_out2))
+
+knitr::kable(select(analytics2@algorithm_summary, SVM_PRECISION:SVM_FSCORE))
+knitr::kable(select(analytics2@algorithm_summary, TREE_PRECISION:TREE_FSCORE))
+knitr::kable(select(analytics2@algorithm_summary, MAXENTROPY_PRECISION:MAXENTROPY_FSCORE))
+
+knitr::kable(analytics2@ensemble_summary)
+```
+
+### ROC curves and AUC values for second test set
+
+```{r roc-auc-2}
+results2 <- cbind(meta(emails2[1:length(emails2)]), svm_out2, tree_out2, maxent_out2)
+
+results2$SVM_PROB[results2$SVM_LABEL == 0] <- 1 - results2$SVM_PROB[results2$SVM_LABEL == 0] 
+results2$TREE_PROB[results2$TREE_LABEL == 0] <- 1 - results2$TREE_PROB[results2$TREE_LABEL == 0] 
+results2$MAXENTROPY_PROB[results2$MAXENTROPY_LABEL == 0] <- 
+  (1 - results2$MAXENTROPY_PROB[results2$MAXENTROPY_LABEL == 0])
+
+pred_svm2 <- prediction(results2$SVM_PROB, results2$spam)
+pred_tree2 <- prediction(results2$TREE_PROB, results2$spam)
+pred_maxent2 <- prediction(results2$MAXENTROPY_PROB, results2$spam)
+
+prf_svm2 <- performance(pred_svm2, measure = "tpr", x.measure = "fpr")
+prf_tree2 <- performance(pred_tree2, measure = "tpr", x.measure = "fpr")
+prf_maxent2 <- performance(pred_maxent2, measure = "tpr", x.measure = "fpr")
+
+auc_svm2 <- performance(pred_svm2, measure = "auc")@y.values[[1]]
+auc_tree2 <- performance(pred_tree2, measure = "auc")@y.values[[1]]
+auc_maxent2 <- performance(pred_maxent2, measure = "auc")@y.values[[1]]
+
+legend.labels2 <- c(str_c("SVM AUC = ", round(auc_svm2, digits = 4)),
+                   str_c("Tree AUC = ", round(auc_tree2, digits = 4)),
+                   str_c("Max Entropy AUC = ", round(auc_maxent2, digits = 4)))
+
+model_perf2 <- bind_rows(data.frame(model = "SVM", 
+                                  FPR = unlist(prf_svm2@x.values), 
+                                  TPR = unlist(prf_svm2@y.values),
+                                  stringsAsFactors = FALSE),
+                       data.frame(model = "Tree", 
+                                  FPR = unlist(prf_tree2@x.values), 
+                                  TPR = unlist(prf_tree2@y.values),
+                                  stringsAsFactors = FALSE),
+                       data.frame(model = "Max Entropy", 
+                                  FPR = unlist(prf_maxent2@x.values), 
+                                  TPR = unlist(prf_maxent2@y.values),
+                                  stringsAsFactors = FALSE))
+
+model_perf2$model <- factor(model_perf2$model, levels = c("SVM", "Tree", "Max Entropy")) 
+
+ggplot(model_perf2, aes(FPR, TPR, color = model, group = model)) + 
+  geom_line() +
+  geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  ggtitle("Performance of Spam/Ham Classifiers") +
+  scale_color_discrete(name = "Classifier Model", labels = legend.labels2) +
+  theme(legend.position = c(0.7, 0.2))
+```
+
+Additional testing on a new, larger set of emails reveals the superior performance of the max entropy and SVM-based classifiers relative to the tree classifier.  The discrepancy between the performance of the tree classifier here and on the initial test set of emails suggests that that model was overfitted during training.
