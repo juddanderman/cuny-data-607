@@ -1,0 +1,38 @@
+---
+title: "Recommender Systems Discussion - Pandora Internet Radio"
+author: "Judd Anderman"
+date: "November 10, 2016"
+output: html_document
+---
+
+Pandora Internet Radio
+www.pandora.com
+
+1) Scenario Design Analysis
+
+a) Who are your target users?
+  
+Pandora's target users are internet radio listeners.  
+  
+b) What are their key goals?
+
+Their key goals are hearing music and cultivating personalized internet radio stations that reflect their established interests in specific songs or artists.   
+
+c) How can you help them accomplish those goals?
+
+Pandora helps its users acheive these goals by building and streaming song playlists on the basis of musical similarity to the songs and/or artists that they have specified.  
+
+2) Reverse Engineering
+
+Pandora uses content-based filtering in order to construct users' stations.  A given station is seeded with songs that are musically similar to a song or artist specified by a user.  Musical similarity is assessed on the basis of Pandora's Music Genome Project, a classification system that uses roughly 400 attributes to describe the musical content of songs.  Pandora founder Tim Westergren explains, "The genome itself is a sort of a very large musical taxonomy.  It's a collection of about 400 musical attributes that collectively essentially describe a song, that altogether comprise the basic elements of a song.  So it's all the details of melody and harmony, rhythm and instrumentation, and form and vocal performance – a song broken down into all the most basic of parts.  It's a bit like musical primary colors in a way," (as quoted in Howe "Pandora's Music Recommender").  Pandora employs a team of trained musicians and musicologists to listen to, analyze, and code every song to be included in its database along the 400 or so features in the genome.  A distance measure is used to compute the similarity between already classified songs along their feature vectors and guides the "recommender" algorithm that builds the playlists by retreiving some number of nearest neighbor songs in the feature space.  Users can further tailor their stations by "liking" or "disliking" individual songs that appear in a given playlist.  This feedback is used to emphasize or deemphasize the weights given to relevant features in the calculations of similarity/distance that guide Pandora's recommendations.
+
+3) Recommendations for Improvement
+
+Two noteworthy limitations of Pandora's recommender system are its reliance on manual classification of musical features and its apparent failure to account for cultural, historical, and geographical contexts in its analysis and clustering of songs.  While Pandora's approach to classifying songs may help to produce accurate and musically relevant recommendation results, as Michael Howe explains in his paper "Pandora's Music Recommender" and Brian Whitman points out in his article "How music recommendation works - and doesn't work", this approach severely constrains the service's scalability, by limiting its ability to classify and catalog new songs, and furthermore, limiting its capacity to expose listeners to worthwhile, but unfamiliar artists and songs that have not been auditioned by Pandora staff because they do not meet the service's opaque standards for inclusion in its music library.  In my opinion, it would be highly productive and very interesting if Pandora engaged in comparative testing of automated versus manual classification of new songs, or as Howe proposes, leveraged crowd-sourcing by allowing its users to participate in the classification process.  In addition, listeners' musical tastes and preferences are not determined exclusively by musical content and form alone, they are also strongly shaped by listeners' social and historical contexts as well as the contexts in which songwriters and musicians are composing, performing, publishing, and distributing their musical creations.  There do not appear to be any overwhelming obstacles to analyzing and utilizing these broader contextual features for the purposes of recommendation, and in many ways, textual analysis of features such as an artist's geographical location, the year a piece of music was released, its record label, and so on, would seem less difficult than automated analysis of harmony, melody, rhythm, etc.     
+
+Sources:
+https://courses.cs.washington.edu/courses/csep521/07wi/prj/michael.pdf
+
+http://notes.variogr.am/post/37675885491/how-music-recommendation-works-and-doesnt-work
+
+https://en.wikipedia.org/wiki/Recommender_system
