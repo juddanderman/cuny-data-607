@@ -334,6 +334,11 @@ datatable(usa_tb, rownames = FALSE)
 
 #### Visualize graph DB using __visNetwork__ package
 
+```{r download-img}
+# downloading the image while knitting the R markdown produced an empty file
+#download.file("https://github.com/juddanderman/cuny-data-607/blob/master/Project4/USA_TB.png?raw=true", "USA_TB.png", method = "curl", mode = "wb")
+```
+
 ![Neo4j Browser: USA TB Notifications](USA_TB.png)
 
 ```{r neo4j-browser}
@@ -443,10 +448,9 @@ viz_net <- function(reg) {
   visNetwork(nodes_reg, edges_reg)
 }
 
-for(i in 1:length(regions)) {
-  cat("Region: ", regions[i], "\n")
-  viz_net(regions[i])
-}
+# visualize first WHO region, looping over length of vector returned no network plots
+cat("Region: ", regions[1], "\n")
+viz_net(regions[1])
 ```
 
 ## Discussion MySQL versus Neo4j
