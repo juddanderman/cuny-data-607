@@ -124,38 +124,40 @@ if(as.numeric(num_rows[[1]]) > 50000) {
 ### Import CMS Hospital Compare data
 
 ```{r hosp-compare-data}
-measures <- rbind(c("amb_surg", "Ambulatory Surgical Measures - Facility", "4jcv-atw7"),
-                  c("hosp_comp", "Complications - Hospital", "632h-zaca"),
-                  c("hosp_hai", "Healthcare Associated Infections - Hospital", "77hc-ibv8"),
-                  c("hosp_acs", "Hospital ACS Measures", "akfs-5dgr"),
-                  c("hosp_readm", "Hospital Readmissions Reduction Program", "9n3s-kdb3"),
-                  c("hvbp_ami", "Hospital Value-Based Purchasing (HVBP) – Acute Myocardial Infarction Scores",
-                    "rm5p-8gae"),
-                  c("hvbp_mspb", "Hospital Value-Based Purchasing (HVBP) – Efficiency Scores", "su9h-3pvj"),
-                  c("hvbp_hai", 
-                    "Hospital Value-Based Purchasing (HVBP) – Healthcare-Associated Infection Scores",
-                    "qmeg-skqq"),
-                  c("hvbp_out", "Hospital Value-Based Purchasing (HVBP) – Outcome Scores", "pudb-wetr"),
-                  c("hvbp_hcahps", 
-                    "Hospital Value-Based Purchasing (HVBP) – Patient Experience of Care Domain Scores (HCAHPS)",
-                    "avtz-f2ge"),
-                  c("hvbp_pn", "Hospital Value-Based Purchasing (HVBP) – Pneumonia Scores", "md6f-wqvv"),
-                  c("hvbp_imm", "Hospital Value-Based Purchasing (HVBP) – Preventive Care Scores", "t8x9-vhj6"),
-                  c("hvbp_scip", 
-                    "Hospital Value-Based Purchasing (HVBP) – Surgical Care Improvement Project Scores", 
-                    "aae7-dzxe"),
-                  c("hvbp_perf", "Hospital Value-Based Purchasing (HVBP) – Total Performance Score",
-                    "ypbt-wvdk"),
-                  c("hosp_hac", "Hospital-Acquired Condition Reduction Program", "yq43-i98g"),
-                  c("inpt_psych", "Inpatient Psychiatric Facility Quality Measure Data – by Facility",
-                    "q9vs-r7wp"),
-                  c("hosp_mspb", "Medicare Hospital Spending Per Patient - Hospital", "rrqw-56er"),
-                  c("hosp_op", "Outpatient Imaging Efficiency - Hospital", "wkfw-kthe"),
-                  c("hosp_hcahps", "Patient survey (HCAHPS) - Hospital", "dgck-syfz"),
-                  c("hosp_paym", "Payment and value of care - Hospital", "c7us-v4mf"),
-                  c("hosp_mort", "Readmissions and Deaths - Hospital", "ynj2-r877"),
-                  c("hosp_time", "Timely and Effective Care - Hospital", "yv7e-xc69")
-                  )
+#measures <- rbind(c("amb_surg", "Ambulatory Surgical Measures - Facility", "4jcv-atw7"),
+#                  c("hosp_comp", "Complications - Hospital", "632h-zaca"),
+#                  c("hosp_hai", "Healthcare Associated Infections - Hospital", "77hc-ibv8"),
+#                  c("hosp_acs", "Hospital ACS Measures", "akfs-5dgr"),
+#                  c("hosp_readm", "Hospital Readmissions Reduction Program", "9n3s-kdb3"),
+#                  c("hvbp_ami", "Hospital Value-Based Purchasing (HVBP) – Acute Myocardial Infarction Scores",
+#                    "rm5p-8gae"),
+#                  c("hvbp_mspb", "Hospital Value-Based Purchasing (HVBP) – Efficiency Scores", "su9h-3pvj"),
+#                  c("hvbp_hai", 
+#                    "Hospital Value-Based Purchasing (HVBP) – Healthcare-Associated Infection Scores",
+#                    "qmeg-skqq"),
+#                  c("hvbp_out", "Hospital Value-Based Purchasing (HVBP) – Outcome Scores", "pudb-wetr"),
+#                  c("hvbp_hcahps", 
+#                    "Hospital Value-Based Purchasing (HVBP) – Patient Experience of Care Domain Scores (HCAHPS)",
+#                    "avtz-f2ge"),
+#                  c("hvbp_pn", "Hospital Value-Based Purchasing (HVBP) – Pneumonia Scores", "md6f-wqvv"),
+#                  c("hvbp_imm", "Hospital Value-Based Purchasing (HVBP) – Preventive Care Scores", "t8x9-vhj6"),
+#                  c("hvbp_scip", 
+#                    "Hospital Value-Based Purchasing (HVBP) – Surgical Care Improvement Project Scores", 
+#                    "aae7-dzxe"),
+#                  c("hvbp_perf", "Hospital Value-Based Purchasing (HVBP) – Total Performance Score",
+#                    "ypbt-wvdk"),
+#                  c("hosp_hac", "Hospital-Acquired Condition Reduction Program", "yq43-i98g"),
+#                  c("inpt_psych", "Inpatient Psychiatric Facility Quality Measure Data – by Facility",
+#                    "q9vs-r7wp"),
+#                  c("hosp_mspb", "Medicare Hospital Spending Per Patient - Hospital", "rrqw-56er"),
+#                  c("hosp_op", "Outpatient Imaging Efficiency - Hospital", "wkfw-kthe"),
+#                  c("hosp_hcahps", "Patient survey (HCAHPS) - Hospital", "dgck-syfz"),
+#                  c("hosp_paym", "Payment and value of care - Hospital", "c7us-v4mf"),
+#                  c("hosp_mort", "Readmissions and Deaths - Hospital", "ynj2-r877"),
+#                  c("hosp_time", "Timely and Effective Care - Hospital", "yv7e-xc69")
+#                  )
+
+measures <- measures <- rbind(c("hosp_hai", "Healthcare Associated Infections - Hospital", "77hc-ibv8"))
 
 colnames(measures) <- c("id", "measure_set", "endpoint")
 measures <- as.data.frame(measures, stringsAsFactors = FALSE)
@@ -174,6 +176,7 @@ for(i in 1:nrow(measures)) {
     pages <- ceiling(as.numeric(num_rows[1]) / 50000) - 1
     json_data <- vector(mode = "list", length = (pages + 1))  
     for(j in 0:pages) {
+      Sys.sleep(1)
       val_offset <- format(j * 50000, scientific = FALSE)
       query_url <- paste0(base_url, "&$order=:id", "&$limit=", 50000, "&$offset=", val_offset)
       json_data[[j + 1]] <- fromJSON(query_url)
@@ -614,7 +617,7 @@ hai_data_5yr <- hai_data_5yr[!is.na(hai_data_5yr$poverty_rate), ]
 ```{r hai-vs-poverty-2}
 cor(hai_data_5yr$poverty_rate, hai_data_5yr$avg_hai, use = "pairwise.complete.obs")
 
-mod2 <- lm(avg_hai ~ I(poverty_rate), data = hai_data_5yr)
+mod2 <- lm(avg_hai ~ poverty_rate, data = hai_data_5yr)
 summary(mod2)
 
 ggplot(hai_data_5yr, aes(x = poverty_rate, avg_hai)) +
@@ -630,9 +633,9 @@ ggplot(hai_data_5yr, aes(x = poverty_rate, avg_hai)) +
 ### Average SIR-HAI scores vs unemployment rate (ACS 5-Year)
 
 ```{r hai-vs-unemployment}
-cor(hai_data_5yr$employment_rate, hai_data_5yr$avg_hai, use = "pairwise.complete.obs")
+cor(hai_data_5yr$unemployment_rate, hai_data_5yr$avg_hai, use = "pairwise.complete.obs")
 
-mod3 <- lm(avg_hai ~ I(unemployment_rate), data = hai_data_5yr)
+mod3 <- lm(avg_hai ~ unemployment_rate, data = hai_data_5yr)
 summary(mod3)
 
 ggplot(hai_data_5yr, aes(x = unemployment_rate, avg_hai)) +
@@ -666,10 +669,10 @@ Analysis of the relationship between poverty rates and the reported incidence of
 
 [CMS.  Hospital Compare datasets.](https://data.medicare.gov/data/hospital-compare)
 
-[CMS.  Healthcare Associated Infections - Hospital](https://data.medicare.gov/Hospital-Compare/Healthcare-Associated-Infections-Hospital/77hc-ibv8)
+[CMS.  Healthcare Associated Infections - Hospital.](https://data.medicare.gov/Hospital-Compare/Healthcare-Associated-Infections-Hospital/77hc-ibv8)
 
 [US Census Bureau.  2016.  Decennial Census (2010, 2000, 1990).](http://www.census.gov/data/developers/data-sets/decennial-census.html)
 
-[US Census Bureau.  2016.  American Community Survey 1-Year Data (2011-2015)](http://www.census.gov/data/developers/data-sets/acs-1year.html)
+[US Census Bureau.  2016.  American Community Survey 1-Year Data (2011-2015).](http://www.census.gov/data/developers/data-sets/acs-1year.html)
 
 [US Census Bureau.  2016.  American Community Survey 5-Year Data (2009-2015).](http://www.census.gov/data/developers/data-sets/acs-5year.html)
