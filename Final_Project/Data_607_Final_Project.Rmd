@@ -1,0 +1,675 @@
+---
+title: "Data 607 Final Project"
+author: "Judd Anderman"
+date: "December 18, 2016"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    code_folding: show
+---
+
+## Introduction
+
+My final project for DATA 607 was motivated primarily by my desire to build a working interface to the US Census Bureau's Decennial Census and American Community Survey (ACS) datasets and CMS Hospital Compare data through their respective APIs.  In my work, I have often turned to census data to support grant writing efforts, community needs assessments, and similar narrative reports.  In addition, I desired easy access to the Hospital Compare data as a source of comparison for my own institution's performance on the reported healthcare quality and patient safety indicators.  
+
+I intended to analyze the relationship between socio-economic and demographic variables on the one hand, and differences in healthcare quality and safety on the other.  However, my success here was constrained by the complexity and heterogeneity of the data that I obtained.  As a start, I examined the relationship between the incidence of healthcare acquired infections and poverty and unemployment rates.  This analysis is summarized and visualized below.
+
+My workflow was guided by the OSEMN model: Obtain, Scrub, Explore, Model, and iNterpret (see [H. Mason & C. Wiggins.  2010.  A Taxonomy of Data Science.  dataists.](http://www.dataists.com/2010/09/a-taxonomy-of-data-science/)) and also invovled several rounds of iteration and adjustment to my approach.  I retreived data from the decennial census, the most recent 1 and 5 year ACS datasets, and 2015 unaggregated hospital/facility-level quality and safety measures through API calls as outlined above.  I also obtained chronic conditions data from CMS; chronic disease indicators and city-level estimates for chronic disease risk factors, health outcomes, and clinical preventive service utilization for the 500 largest cities in the US from the CDC; and dictionaries of Federal Information Processing Standard (FIPS) for states and census-designated places (CDPs) codes as well a cross-walk between the FIPS codes and ZIP Code Tabulation Areas (ZCTAs) used by the Census Bureau.  The FIPS codes dictionaries and ZIP code cross-walk facilitated relabeling for tables and plots where states and places had been designated with numeric coded values and allowed for the combination of datasets.  
+
+I had also proposed building a Shiny application to enable interactive exploration, analysis, and visualization of the data described above.  While I was unable to complete this task, I did store the names, descriptions, and categories of all of the variables accessible through the three Census Bureau APIs that I used here so that I would ultimately be able to produce an interface that would translate between relatively clear variable labels that could be selected by other users and then pass the associated identifiers on to API queries in order to retrieve the desired data.  Sources for all data are referenced and linked at the conclusion of this report.
+
+### Load required packages
+
+```{r setup}
+# set working directory, change as needed
+setwd("~/DATA 607 Data Acquisition and Management/Final_Project")
+
+library(RCurl)
+library(xlsx)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(httr)
+library(jsonlite)
+library(DT)
+library(rvest)
+library(ggplot2)
+library(scales)
+```
+
+## Import data
+
+### Download, unzip, and read-in 2014 CMS Chronic Conditions data
+
+```{r cc-data}
+url <- "https://www.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Chronic-Conditions/Downloads/CC_Prev_State_County_All.zip"
+
+name <- str_extract(url, "(?<=/)([[:alpha:]]|_)+\\.zip")
+
+download.file(url, name, method = "curl")  #change method argument as needed for OS
+
+unzip(name, exdir = "CC_Prev_State_County_All")
+
+chron_cond <- read.xlsx2("CC_Prev_State_County_All/County_Table_Chronic_Conditions_Prevalence_by_Age_2014.xlsx", sheetName = "All Beneficiaries", startRow = 3, header = FALSE, stringsAsFactors = FALSE)
+```
+
+### Download and read-in 2010 FIPS codes from US Census Bureau
+
+```{r fips-data-1}
+download.file("http://www2.census.gov/geo/docs/reference/codes/files/national_county.txt", "2010_FIPS_County_Codes.txt")
+
+fips_county <- read.csv("2010_FIPS_County_Codes.txt", header = FALSE, stringsAsFactors = FALSE,
+                       colClasses = c(rep("character", 5)))
+colnames(fips_county) <- c("state", "state_fp", "county_fp", "county", "class_fp")
+```
+
+```{r fips-data-2}
+download.file("https://www.census.gov/2010census/xls/fips_codes_website.xls", "2010_FIPS_Place_Codes.xls")
+
+fips_place <- read.xlsx2("2010_FIPS_Place_Codes.xls", sheetIndex = 1, header = TRUE, stringsAsFactors = FALSE)
+colnames(fips_place) <- str_replace_all(tolower(colnames(fips_place)), "\\.", "_")
+```
+
+### Download and read-in 2010 ZIP Code Tabulation Area (ZCTA) - FIPS Place Code cross-walk
+
+```{r zip-fips}
+download.file("http://www2.census.gov/geo/docs/maps-data/data/rel/zcta_place_rel_10.txt", "zcta_place.txt")
+zip_fips_xref <- read.csv("zcta_place.txt", header = TRUE, stringsAsFactors = FALSE,
+                          colClasses = c(rep("character", 25)))
+```
+
+### Import CDC Chronic Disease Indicators dataset
+
+```{r cdi-data}
+cdi <- getURL("https://chronicdata.cdc.gov/api/views/g4ie-h725/rows.csv?accessType=DOWNLOAD")
+chron_dis <- read.csv(textConnection(cdi))
+colnames(chron_dis) <- tolower(str_replace_all(colnames(chron_dis), "([a-z])([A-Z])", "\\1_\\2"))
+```
+
+### Read-in API keys
+
+```{r user-pw, echo = FALSE}
+# store API keys in unshared folder and read-in for querying
+source("~/Documents/Fall 2016/Data_607_Proj_API_Keys.R")
+```
+
+### Import CDC 500 Cities: Local Data for Better Health dataset
+
+```{r 500-cities-data}
+#download.file("https://data.cdc.gov/api/views/6vp6-wxuq/rows.csv?accessType=DOWNLOAD", "500_Cities.csv")
+#cities_data <- read.csv("500_Cities.csv")
+
+base_url <- paste0("https://chronicdata.cdc.gov/resource/csmm-fdhi.json?", 
+                     "$$app_token=", soda_token)
+  
+num_rows <- fromJSON(paste0(base_url, "&$select=count(*)"))
+
+if(as.numeric(num_rows[[1]]) > 50000) {
+  pages <- ceiling(as.numeric(num_rows[1]) / 50000) - 1
+  json_data <- vector(mode = "list", length = (pages + 1))  
+  for(j in 0:pages) {
+    val_offset <- format(j * 50000, scientific = FALSE)
+    query_url <- paste0(base_url, "&$order=:id", "&$limit=", 50000, "&$offset=", val_offset)
+    json_data[[j + 1]] <- fromJSON(query_url)
+  }
+  
+  cities_data <- rbind.pages(json_data)
+  json_data <- NULL
+} else {
+  cities_data <- fromJSON(paste0(base_url, "&$limit=", num_rows[1]))
+}
+```
+
+### Import CMS Hospital Compare data
+
+```{r hosp-compare-data}
+measures <- rbind(c("amb_surg", "Ambulatory Surgical Measures - Facility", "4jcv-atw7"),
+                  c("hosp_comp", "Complications - Hospital", "632h-zaca"),
+                  c("hosp_hai", "Healthcare Associated Infections - Hospital", "77hc-ibv8"),
+                  c("hosp_acs", "Hospital ACS Measures", "akfs-5dgr"),
+                  c("hosp_readm", "Hospital Readmissions Reduction Program", "9n3s-kdb3"),
+                  c("hvbp_ami", "Hospital Value-Based Purchasing (HVBP) – Acute Myocardial Infarction Scores",
+                    "rm5p-8gae"),
+                  c("hvbp_mspb", "Hospital Value-Based Purchasing (HVBP) – Efficiency Scores", "su9h-3pvj"),
+                  c("hvbp_hai", 
+                    "Hospital Value-Based Purchasing (HVBP) – Healthcare-Associated Infection Scores",
+                    "qmeg-skqq"),
+                  c("hvbp_out", "Hospital Value-Based Purchasing (HVBP) – Outcome Scores", "pudb-wetr"),
+                  c("hvbp_hcahps", 
+                    "Hospital Value-Based Purchasing (HVBP) – Patient Experience of Care Domain Scores (HCAHPS)",
+                    "avtz-f2ge"),
+                  c("hvbp_pn", "Hospital Value-Based Purchasing (HVBP) – Pneumonia Scores", "md6f-wqvv"),
+                  c("hvbp_imm", "Hospital Value-Based Purchasing (HVBP) – Preventive Care Scores", "t8x9-vhj6"),
+                  c("hvbp_scip", 
+                    "Hospital Value-Based Purchasing (HVBP) – Surgical Care Improvement Project Scores", 
+                    "aae7-dzxe"),
+                  c("hvbp_perf", "Hospital Value-Based Purchasing (HVBP) – Total Performance Score",
+                    "ypbt-wvdk"),
+                  c("hosp_hac", "Hospital-Acquired Condition Reduction Program", "yq43-i98g"),
+                  c("inpt_psych", "Inpatient Psychiatric Facility Quality Measure Data – by Facility",
+                    "q9vs-r7wp"),
+                  c("hosp_mspb", "Medicare Hospital Spending Per Patient - Hospital", "rrqw-56er"),
+                  c("hosp_op", "Outpatient Imaging Efficiency - Hospital", "wkfw-kthe"),
+                  c("hosp_hcahps", "Patient survey (HCAHPS) - Hospital", "dgck-syfz"),
+                  c("hosp_paym", "Payment and value of care - Hospital", "c7us-v4mf"),
+                  c("hosp_mort", "Readmissions and Deaths - Hospital", "ynj2-r877"),
+                  c("hosp_time", "Timely and Effective Care - Hospital", "yv7e-xc69")
+                  )
+
+colnames(measures) <- c("id", "measure_set", "endpoint")
+measures <- as.data.frame(measures, stringsAsFactors = FALSE)
+
+hospital_compare <- vector("list", nrow(measures))
+
+for(i in 1:nrow(measures)) {
+  names(hospital_compare)[i] <- measures[i, 1]
+  
+  base_url <- paste0("https://data.medicare.gov/resource/", measures[i, 3], ".json?", 
+                     "$$app_token=", soda_token)
+  
+  num_rows <- fromJSON(paste0(base_url, "&$select=count(*)"))
+  
+  if(as.numeric(num_rows[[1]]) > 50000) {
+    pages <- ceiling(as.numeric(num_rows[1]) / 50000) - 1
+    json_data <- vector(mode = "list", length = (pages + 1))  
+    for(j in 0:pages) {
+      val_offset <- format(j * 50000, scientific = FALSE)
+      query_url <- paste0(base_url, "&$order=:id", "&$limit=", 50000, "&$offset=", val_offset)
+      json_data[[j + 1]] <- fromJSON(query_url)
+    }
+    
+    hospital_compare[[i]] <- rbind.pages(json_data)
+    json_data <- NULL
+    
+  } else {
+    hospital_compare[[i]] <- fromJSON(paste0(base_url, "&$limit=", num_rows[1]))
+  }
+}
+```
+
+### Import US Census data
+
+#### 2010 Decennial Census Summary File 1 (SF1) data
+
+```{r census-data}
+table1_html <- read_html("http://api.census.gov/data/2010/sf1/variables.html")
+
+census_vars <- (table1_html %>% html_nodes("table") %>% html_table(header = FALSE))[[1]]
+vars <- str_replace_all(tolower(census_vars[1, ]), " ", "_")
+colnames(census_vars) <- vars
+census_vars <- census_vars[-(1:2),  ]
+
+census_url <- paste0("http://api.census.gov/data/2010/sf1?key=", census_key)
+
+census_query <- paste0("&get=NAME,",
+                       paste0("P005000", seq(1, 9, 1), collapse = ","), ",",
+                       paste0("P005001", seq(0, 7, 1), collapse = ","),
+                       "&for=place:*")
+
+census_data <- fromJSON(paste0(census_url, census_query))
+```
+
+#### 2015 American Community Survey (ACS) 1-Year Profile data
+
+```{r acs-data}
+acs_1yr_vars <- fromJSON("http://api.census.gov/data/2015/acs1/profile/variables.json")
+acs_1yr_vars <- bind_rows(acs_1yr_vars$variables, .id = "name")
+
+acs_1yr_url <- paste0("http://api.census.gov/data/2015/acs1/profile?key=", census_key)
+
+acs_1yr_query <- paste0("&get=NAME,",
+                    paste0("DP02_00", seq(59, 65, 1), "PE", collapse = ","), ",",
+                    paste("DP02_0071PE",
+                          "DP02_0092PE",
+                          "DP02_0151PE",
+                          "DP02_0152PE",
+                          "DP03_0009PE",
+                          "DP03_0062E",
+                          "DP03_0063E",
+                          #"DP03_0073PE",
+                          "DP03_0074PE",
+                          "DP03_0098PE",
+                          "DP03_0099PE",
+                          "DP03_0119PE",
+                          "DP03_0128PE",
+                          sep = ","), 
+                    "&for=place:*")
+
+acs_1yr_data <- fromJSON(paste0(acs_1yr_url, acs_1yr_query))
+```
+
+### Retrieve 2009-2015 ACS 5-Year Profile data
+
+```{r acs-5-yr}
+acs_5yr_vars <- fromJSON("http://api.census.gov/data/2015/acs5/profile/variables.json")
+acs_5yr_vars <- bind_rows(acs_5yr_vars$variables, .id = "name")
+
+acs_5yr_url <- paste0("http://api.census.gov/data/2015/acs5/profile?key=", census_key)
+acs_5yr_query <- "&get=DP03_0128PE,DP03_0009PE&for=zip+code+tabulation+area:*"
+
+acs_5yr_data <- fromJSON(paste0(acs_5yr_url, acs_5yr_query))
+```
+
+## Data cleaning and transformation
+
+### 2014 CMS Chronic Conditions data
+
+```{r cc-clean}
+chron_cond[sapply(chron_cond, function(x) str_detect(x, "\\*"))] <- NA
+
+colnames(chron_cond) <- c(chron_cond[4, 1:3],
+                          chron_cond[1, 4],
+                          chron_cond[3, 5:15],
+                          chron_cond[1, 16],
+                          chron_cond[3, 17:22])
+
+colnames(chron_cond) <- tolower(colnames(chron_cond))
+colnames(chron_cond) <- str_replace_all(str_trim(colnames(chron_cond)), " |/", "_")
+colnames(chron_cond) <- str_replace_all(colnames(chron_cond), "'", "")
+colnames(chron_cond)[3] <- "fips_code"
+colnames(chron_cond)[16] <- "hepatitis_hvb_hvc"
+
+chron_cond <- chron_cond[5:nrow(chron_cond), ]
+chron_cond[, 4:22] <- sapply(chron_cond[, 4:22], function(x) as.numeric(x))
+```
+
+### Clean CDC 500 Cities data
+
+```{r 500-cities-clean}
+cities_data[, c(3, 9, 10, 13, 18)] <- 
+  sapply(cities_data[, c(3, 9, 10, 13, 18)], function(x) as.numeric(x))
+```
+
+### Clean 2010 Decennial Census data, compute and melt proportions by race and ethnicity
+
+```{r census-transform}
+colnames(census_data) <- census_data[1, ]
+census_data <- as.data.frame(census_data, stringsAsFactors = FALSE)
+census_data <- census_data[-1, ]
+census_data[, 2:18] <- 
+  sapply(census_data[, 2:18], function(x) as.numeric(x))
+
+census_props <- census_data %>% 
+  mutate(white_non_hisp = P0050003/P0050001,
+         black_non_hisp = P0050004/P0050001,
+         ai_an_non_hisp = P0050005/P0050001,
+         asian_non_hisp = P0050006/P0050001,
+         nhpi_non_hisp = P0050007/P0050001,
+         other_non_hisp = P0050008/P0050001,
+         multi_non_hisp = P0050009/P0050001,
+         white_hisp = P0050011/P0050001,
+         black_hisp = P0050012/P0050001,
+         ai_an_hisp = P0050013/P0050001,
+         asian_hisp = P0050014/P0050001,
+         nhpi_hisp = P0050015/P0050001,
+         other_hisp = P0050016/P0050001,
+         multi_hisp = P0050017/P0050001) %>%
+  select(NAME, state, place, white_non_hisp:multi_hisp)
+
+census_props <- census_props %>% gather(race_ethnicity, proportion, white_non_hisp:multi_hisp)
+
+state_props <- census_data %>%
+  group_by(state) %>%
+  summarize(white_non_hisp = sum(P0050003)/sum(P0050001),
+            black_non_hisp = sum(P0050004)/sum(P0050001),
+            ai_an_non_hisp = sum(P0050005)/sum(P0050001),
+            asian_non_hisp = sum(P0050006)/sum(P0050001),
+            nhpi_non_hisp = sum(P0050007)/sum(P0050001),
+            other_non_hisp = sum(P0050008)/sum(P0050001),
+            multi_non_hisp = sum(P0050009)/sum(P0050001),
+            white_hisp = sum(P0050011)/sum(P0050001),
+            black_hisp = sum(P0050012)/sum(P0050001),
+            ai_an_hisp = sum(P0050013)/sum(P0050001),
+            asian_hisp = sum(P0050014)/sum(P0050001),
+            nhpi_hisp = sum(P0050015)/sum(P0050001),
+            other_hisp = sum(P0050016)/sum(P0050001),
+            multi_hisp = sum(P0050017)/sum(P0050001))
+
+state_props <- state_props %>% gather(race_ethnicity, proportion, white_non_hisp:multi_hisp)
+```
+
+### Clean and tidy 2015 ACS 1-Year data
+
+```{r acs-1yr-tidy}
+acs_1yr_data <- as.data.frame(acs_1yr_data, stringsAsFactors = FALSE)
+colnames(acs_1yr_data) <- acs_1yr_data[1, ]
+acs_1yr_data <- acs_1yr_data[-1, ]
+acs_1yr_data[, 2:20] <- 
+  sapply(acs_1yr_data[, 2:20], function(x) as.numeric(x))
+acs_1yr_data <- acs_1yr_data %>% select(NAME, state, place, DP02_0059PE:DP03_0128PE)
+
+acs_labs <- c("edu_less_9",
+              "edu_9_to_12",
+              "edu_HS",
+              "edu_no_degree",
+              "edu_associates",
+              "edu_bachelors",
+              "edu_grad_degree",
+              "disabled",
+              "foreign_born",
+              "hh_computer",
+              "hh_broadband",
+              "unemployment_rate",
+              "median_hh_income",
+              "mean_hh_income",
+              "hh_snap",
+              "public_ins",
+              "no_ins",
+              "families_below_fpl",
+              "pop_below_fpl")
+
+colnames(acs_1yr_data)[4:22] <- acs_labs
+
+acs_1yr_data <- acs_1yr_data %>% gather(variable, value, edu_less_9:pop_below_fpl)
+```
+
+### Clean 2009-2015 ACS 5-Year data
+
+```{r clean-acs-5yr}
+acs_5yr_data <- acs_5yr_data[-1, ]
+colnames(acs_5yr_data) <- c("poverty_rate", "unemployment_rate", "zip_code")
+
+acs_5yr_data <- as.data.frame(acs_5yr_data, stringsAsFactors = FALSE)
+acs_5yr_data[, 1:2] <- sapply(acs_5yr_data[, 1:2], function(x) as.numeric(x))
+```
+
+## Exploratory analysis and visualization
+
+### CMS Hospital Compare data
+
+```{r hosp-comp-sum}
+hosp_comp_dims <- t(sapply(hospital_compare, function(x) dim(x)))
+hosp_comp_dims <- data.frame(rownames(hosp_comp_dims), hosp_comp_dims)
+colnames(hosp_comp_dims) <- c("dataset", "num_obs", "num_vars")
+rownames(hosp_comp_dims) <- NULL
+knitr::kable(hosp_comp_dims)
+```
+
+### 2010 Census: Distribution of race and ethnic background for populations of census-designated places (CDPs)
+
+```{r census-race-ethnicity}
+positions <- c("white_non_hisp",
+               "black_non_hisp",
+               "ai_an_non_hisp",
+               "asian_non_hisp",
+               "nhpi_non_hisp",
+               "other_non_hisp",
+               "multi_non_hisp",
+               "white_hisp",
+               "black_hisp",
+               "ai_an_hisp",
+               "asian_hisp",
+               "nhpi_hisp",
+               "other_hisp",
+               "multi_hisp")
+
+ggplot(state_props, aes(x = race_ethnicity, y = proportion)) +
+  geom_violin(scale = "width") +
+  scale_x_discrete(limits = positions) +
+  scale_y_continuous(labels = percent) +
+  ggtitle("Distribution of race and ethnicity aggregated by state") +
+  theme(plot.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1)) 
+  
+ggplot(census_props, aes(x = race_ethnicity, y = proportion)) +
+  geom_boxplot() +
+  scale_x_discrete(limits = positions) +
+  scale_y_continuous(labels = percent) +
+  ggtitle("Distribution of race and ethncity across CDPs") +
+  theme(plot.title = element_text(size = 11),
+        axis.text.x = element_text(angle = 45, hjust = 1)) 
+```
+
+### 2015 ACS 1-Year: Distribution of educational attainment across populations of CDPs
+
+```{r acs-edu}
+edu_data <- acs_1yr_data %>% 
+  filter(variable %in% 
+           c("edu_less_9",
+             "edu_9_to_12",
+             "edu_HS",
+             "edu_no_degree",
+             "edu_associates",
+             "edu_bachelors",
+             "edu_grad_degree"))
+
+edu_data$variable <- factor(edu_data$variable,
+                            levels = c("edu_less_9",
+                                       "edu_9_to_12",
+                                       "edu_HS",
+                                       "edu_no_degree",
+                                       "edu_associates",
+                                       "edu_bachelors",
+                                       "edu_grad_degree"))
+
+ggplot(edu_data, aes(x = value, fill = variable)) +
+  geom_density(alpha = 0.4) +
+  labs(x = "% population") +
+  scale_fill_discrete(name = "educational attainment",
+                      labels = c("< 9th grade",
+                                 "9th to 12th grade",
+                                 "HS graduate",
+                                 "some college, no degree",
+                                 "associate's degree",
+                                 "bachelor's degree",
+                                 "graduate degree"))
+```
+
+### 2015 ACS 1-Year: Distributions of median and mean household income
+
+```{r acs-income}
+income_data <- acs_1yr_data %>% filter(variable %in% c("median_hh_income", "mean_hh_income"))
+
+ggplot(income_data, aes(x = value, fill = variable)) +
+  geom_histogram() +
+  labs(x = "household income (2015 dollars)") + 
+  guides(fill = "none") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  facet_wrap(~variable, nrow = 2)
+```
+
+## Analysis: Exploring the relationship between poverty rate and risk-adjusted incidence of healthcare associated infections (HAI)
+
+### Prepare data for vizualization
+
+```{r pov-hai}
+acs_poverty <- acs_1yr_data %>% 
+  filter(variable == "pop_below_fpl") %>% 
+  select(NAME, state, place, value) %>%
+  rename(poverty_rate = value)
+
+acs_poverty <- left_join(acs_poverty, fips_place, 
+                      by = c("state" = "state_fips_code"))
+acs_poverty <- acs_poverty %>% select(NAME:state_abbreviation) %>% distinct()
+
+hai_data <- hospital_compare$hosp_hai %>% 
+  select(state, city, zip_code, provider_id, measure_id, score) %>% 
+  filter(measure_id %in% 
+           c("HAI_1_SIR",
+             "HAI_2_SIR",
+             "HAI_3_SIR",
+             "HAI_4_SIR",
+             "HAI_5_SIR",
+             "HAI_6_SIR"))
+
+hai_data$score <- as.numeric(hai_data$score)
+hai_data <- hai_data[!is.na(hai_data$score), ]
+
+hai_data <- hai_data %>% 
+  spread(measure_id, score) %>%
+  rename(clabsi = HAI_1_SIR,
+         cauti = HAI_2_SIR,
+         ssi_colon = HAI_3_SIR,
+         ssi_hyst = HAI_4_SIR,
+         mrsa_bsi = HAI_5_SIR,
+         c_diff = HAI_6_SIR) %>%
+  rowwise() %>%
+  mutate(avg_hai = mean(c(clabsi, cauti, ssi_colon,
+                         ssi_hyst, mrsa_bsi, c_diff),
+                         na.rm = TRUE))
+
+hai_data <- hai_data %>% gather(measure, sir_score, 5:11)
+```
+
+### Poverty rates across CDPs in 2015 ACS 1-Year & across ZCTAs in 2009-2015 ACS 5-Year datasets
+
+```{r pov-sum-viz}
+knitr::kable(acs_poverty %>% summarize(mean = mean(poverty_rate),
+                          sd = sd(poverty_rate),
+                          num_places = n()),
+             caption = "Poverty rates across CDPs in 2015 ACS 1-Year dataset")
+
+knitr::kable(acs_5yr_data %>% 
+               summarize(mean = mean(poverty_rate, na.rm = TRUE),
+                         sd = sd(poverty_rate, na.rm = TRUE),
+                         num_ZCTAs = n()),
+             caption = "Poverty rates across ZCTAs in 2009-2015 ACS 5-Year dataset")
+
+ggplot(acs_poverty, aes(x = poverty_rate)) +
+  geom_histogram() +
+  xlab("poverty rate for CDPs in 2015 ACS 1-Year data")
+
+state_poverty <- acs_poverty %>% 
+  group_by(state_abbreviation) %>%
+  summarize(avg_poverty_rate = mean(poverty_rate)) %>%
+  rename(state = state_abbreviation)
+
+ggplot(state_poverty, aes(x = state, y = avg_poverty_rate/100)) +
+  geom_bar(stat = "identity") + 
+  scale_y_continuous(labels = percent) +
+  ylab("avg poverty rate for CDPs in 2015 ACS 1-Year data") +
+  theme(axis.text.x = element_text(size = 7, angle = 90, hjust = 1, vjust = 0.5))
+
+ggplot(acs_poverty, aes(x = state_abbreviation, y = poverty_rate/100)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = percent) +
+  xlab("state") +
+  ylab("poverty rate for CDPs in 2015 ACS 1-Year data") +
+  theme(axis.text.x = element_text(size = 7, angle = 90, hjust = 1, vjust = 0.5))
+
+ggplot(acs_5yr_data, aes(x = poverty_rate/100)) +
+  geom_histogram(aes(y = ..density../100), fill = "blue") +
+  geom_density(aes(y = ..density../100), color = "red") +
+  scale_x_continuous(labels = percent) +
+  ylab("density") +
+  xlab("poverty rate for ZCTAs in 2009-2015 ACS 5-Year data")
+```
+
+### Distributions of standardized infection ratio (SIR) scores across HAI measures
+
+I decided to use an unweighted average of the standardized infection ratio (SIR) scores for 6 of HAI measures in one of the relevant Hospital Compare datasets as a single measure of infection prevention performance ([Healthcare Associated Infections - Hospital](https://data.medicare.gov/Hospital-Compare/Healthcare-Associated-Infections-Hospital/77hc-ibv8)).  The CDC developed the SIR as an instrument to track HAI prevention progress over time, with lower SIR scores associated with improvements in infection prevention.  SIR scores are adjusted for risk factors linked to differences in infection rates in order to correct for differences in patient populations and clinical capacities across healthcare facilities, "For example, HAI rates at a hospital that has a large burn unit (where patients are at higher risk of acquiring infections) cannot be directly compared to a hospital that does not have a burn unit," ([CDC.  2016.  HAI Progress Report FAQ](https://www.cdc.gov/hai/surveillance/progress-report/faq.html)).
+
+```{r hai-sum-viz}
+ggplot(hai_data %>% filter(measure != "avg_hai"), aes(x = sir_score)) +
+  geom_histogram() +
+  xlab("HAI SIR score") +
+  facet_wrap(~measure, nrow = 3)
+
+ggplot(hai_data %>% filter(measure == "avg_hai"), aes(x = state, y = sir_score)) +
+  geom_boxplot() +
+  ylab("avg SIR score across HAI measures")
+  theme(axis.text.x = element_text(size = 7, angle = 90, hjust = 1, vjust = 0.5))
+```
+
+### Join 2015 ACS 1-Year Profile data to HAI data using ZCTA-FIPS cross-walk
+
+```{r join-1}
+hai_data_1yr <- left_join(hai_data, zip_fips_xref, by = c("zip_code" = "ZCTA5"))
+hai_data_1yr <- left_join(hai_data_1yr, acs_poverty, by = c("STATE" = "state", 
+                                                            "PLACE" = "place"))
+
+hai_data_1yr <- hai_data_1yr[!is.na(hai_data_1yr$poverty_rate), ]
+hai_data_1yr <- hai_data_1yr %>% spread(measure, sir_score)
+```
+
+### Average SIR-HAI scores vs poverty rate (ACS 1-Year)
+
+```{r hai-vs-poverty-1}
+cor(hai_data_1yr$poverty_rate, hai_data_1yr$avg_hai)
+
+mod1 <- lm(avg_hai ~ I(poverty_rate), data = hai_data_1yr)
+summary(mod1)
+
+ggplot(hai_data_1yr, aes(x = poverty_rate, avg_hai)) +
+  geom_point() +
+  geom_abline(intercept = mod1$coefficients[[1]],
+         slope = mod1$coefficients[[2]],
+         color = "red") +
+  geom_smooth() +
+  xlab("poverty rate (%)") +
+  ylab("avg SIR score across HAI measures")
+```
+
+### Join 2015 ACS 5-Year Profile data to HAI data on shared `zip_code` variable
+
+```{r join-2}
+hai_data_5yr <- hai_data %>% spread(measure, sir_score)
+hai_data_5yr <- left_join(hai_data_5yr, acs_5yr_data, by = c("zip_code"))
+hai_data_5yr <- hai_data_5yr[!is.na(hai_data_5yr$poverty_rate), ]
+```
+
+### Average SIR-HAI scores vs poverty rate (ACS 5-Year)
+
+```{r hai-vs-poverty-2}
+cor(hai_data_5yr$poverty_rate, hai_data_5yr$avg_hai, use = "pairwise.complete.obs")
+
+mod2 <- lm(avg_hai ~ I(poverty_rate), data = hai_data_5yr)
+summary(mod2)
+
+ggplot(hai_data_5yr, aes(x = poverty_rate, avg_hai)) +
+  geom_point() +
+  geom_abline(intercept = mod2$coefficients[[1]],
+         slope = mod2$coefficients[[2]],
+         color = "red") +
+  geom_smooth() +
+  xlab("poverty rate (%)") +
+  ylab("avg SIR score across HAI measures")
+```
+
+### Average SIR-HAI scores vs unemployment rate (ACS 5-Year)
+
+```{r hai-vs-unemployment}
+cor(hai_data_5yr$employment_rate, hai_data_5yr$avg_hai, use = "pairwise.complete.obs")
+
+mod3 <- lm(avg_hai ~ I(unemployment_rate), data = hai_data_5yr)
+summary(mod3)
+
+ggplot(hai_data_5yr, aes(x = unemployment_rate, avg_hai)) +
+  geom_point() +
+  geom_abline(intercept = mod3$coefficients[[1]],
+         slope = mod3$coefficients[[2]],
+         color = "red") +
+  geom_smooth() +
+  xlab("unemployment rate (%)") +
+  ylab("avg SIR score across HAI measures")
+```
+
+## Discussion
+
+Analysis of the relationship between poverty rates and the reported incidence of healthcare acquired infections reveals a very weak positive association between the variables.  While the data did not display linear trends between the variables, whether using poverty rates derived from the 2015 ACS 1-Year data and aggregated at the level of census-designated places or those obtained from the 2009-2015 ACS 5-year dataset at the level of ZIP code area, I did fit linear regression models in order to assess the effectiveness of poverty rate as a predictor of healthcare acquired infection.  Given the poor explanatory power of these models, I repeated this process using unemployment rates sourced from the 2009-2015 ACS 5-year dataset as an explanatory variable.  The results were similar - unemployment rate appeared to be a poor predictor of hospitals' average SIR score across measures of central-line associated bloodstream infection, catheter-associated urinary tract infection,  surgical site infection for colon resection and hysterectomy, MRSA bloodstream infection, and C. difficile gastrointestinal infection.  This approach was based on the premise that the socio-economic characteristics of the community surrounding a given healthcare facilitiy, here poverty and unemployment, might be associated with an indicator of healthcare quality and safety like HAI.  My analysis suggests instead that the incidence of healthcare associated infections is independent of poverty unemployment rates in the immediately surrounding area.  In any case, the public reporting of the data sourced for this project provides rich ground for further exploration and analysis and should serve as a valuable resource for patients, providers, and public experts interested in working towards greater accountability, higher quality, and greater safety in the healthcare arena.    
+
+
+## Data sources:
+
+[CMS.  2016.  Chronic Conditions.](https://www.cms.gov/Research-Statistics-Data-and-Systems/Statistics-Trends-and-Reports/Chronic-Conditions/CC_Main.html)
+
+[US Census Bureau.  2010 FIPS Codes for Counties and County Equivalent Entities.](https://www.census.gov/geo/reference/codes/cou.html)
+
+[US Census Bureau.  2010 ANSI Codes for Places.](https://www.census.gov/geo/reference/codes/place.html)
+
+[US Census Bureau.  Download 2010 ZIP Code Tabulation Area (ZCTA) Relationship Files.](https://www.census.gov/geo/maps-data/data/zcta_rel_download.html)
+
+[CDC.  2016.  U.S. Chronic Disease Indicators (CDI).](http://catalog.data.gov/dataset/u-s-chronic-disease-indicators-cdi-e50c9)
+
+[CDC.  500 Cities Data.](https://chronicdata.cdc.gov/health-area/500-cities)
+
+[CMS.  Hospital Compare datasets.](https://data.medicare.gov/data/hospital-compare)
+
+[CMS.  Healthcare Associated Infections - Hospital](https://data.medicare.gov/Hospital-Compare/Healthcare-Associated-Infections-Hospital/77hc-ibv8)
+
+[US Census Bureau.  2016.  Decennial Census (2010, 2000, 1990).](http://www.census.gov/data/developers/data-sets/decennial-census.html)
+
+[US Census Bureau.  2016.  American Community Survey 1-Year Data (2011-2015)](http://www.census.gov/data/developers/data-sets/acs-1year.html)
+
+[US Census Bureau.  2016.  American Community Survey 5-Year Data (2009-2015).](http://www.census.gov/data/developers/data-sets/acs-5year.html)
